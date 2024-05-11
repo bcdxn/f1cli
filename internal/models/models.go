@@ -9,7 +9,8 @@ import (
 )
 
 type Schedule struct {
-	Events []*RaceEvent
+	Events    []*RaceEvent
+	HeroEvent *RaceEvent
 }
 
 type RaceEvent struct {
