@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/bcdxn/f1cli/internal/f1scraper"
 	"github.com/bcdxn/f1cli/internal/models"
@@ -35,6 +34,7 @@ type teaAppState struct {
 	loadingMsg string
 	errMsg     string
 	spinner    spinner.Model
+	schedule   *models.Schedule
 	list       list.Model
 }
 
@@ -72,7 +72,7 @@ func (s teaAppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if s.isLoading {
 			return s, fetchSchedule()
 		} else {
-			s.list.SetSize(s.width, s.height)
+			s.list.SetSize(s.width-1, s.height-2)
 		}
 		return s, nil
 	case tea.KeyMsg:
@@ -80,8 +80,15 @@ func (s teaAppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.list, cmd = s.list.Update(msg)
 		return s, cmd
 	case ScheduleMsg:
-		s.list = initList(msg.events, s.width, s.height)
+		s.schedule = msg.schedule
+		s.list = initList(s.schedule.Events, s.width-1, s.height-2)
 		s.isLoading = false
+		// Fetch session details
+		return s, fetchEventDetails(s.schedule.GetHeroEvent())
+	case EventDetailsMsg:
+		tealogger.Log(fmt.Sprintf("sessions:::%d", len(msg.sessions)))
+		hero := s.schedule.GetHeroEvent()
+		hero.Sessions = msg.sessions
 		return s, nil
 	default:
 		var cmd tea.Cmd
@@ -103,7 +110,7 @@ func (s teaAppState) View() string {
 		str = lipgloss.JoinVertical(
 			lipgloss.Top,
 			"",
-			titleStyle.Width(s.width).Render("F1 CLI - Schedule"),
+			titleStyle.Width(s.width).Render("Schedule"),
 			s.list.View(),
 		)
 	}
@@ -129,27 +136,44 @@ func fetchSchedule() tea.Cmd {
 	return func() tea.Msg {
 		f := f1scraper.New()
 
-		events, err := f.GetSchedule()
+		schedule, err := f.GetSchedule()
 
 		if err != nil {
 			tealogger.LogErr(err)
 			return ErrorMsg(errors.New("error fetching schedule"))
 		}
 
-		return ScheduleMsg(ScheduleMsg{
-			events: events,
-		})
+		return ScheduleMsg{
+			schedule: schedule,
+		}
 	}
 }
 
-func initList(events []models.RaceEvent, width, height int) list.Model {
+func fetchEventDetails(event *models.RaceEvent) tea.Cmd {
+	return func() tea.Msg {
+		f := f1scraper.New()
+		sessions, err := f.GetEventSessions(event.Location)
+
+		if err != nil {
+			tealogger.LogErr(err)
+		}
+
+		return EventDetailsMsg{
+			sessions: sessions,
+		}
+	}
+}
+
+func initList(events []*models.RaceEvent, width, height int) list.Model {
 	d := list.NewDefaultDelegate()
+
 	d.Styles.SelectedTitle = d.Styles.SelectedTitle.Foreground(lipgloss.Color(f1Red))
 	d.Styles.SelectedDesc = d.Styles.SelectedDesc.Foreground(lipgloss.Color(f1Red))
 
-	list := list.New(make([]list.Item, len(events)), d, width, height-2)
+	list := list.New(make([]list.Item, len(events)), d, width, height)
 	list.SetShowTitle(false)
 	list.SetShowStatusBar(false)
+	list.Styles.Spinner = d.Styles.SelectedTitle.Foreground(lipgloss.Color(f1Red))
 
 	for i, event := range events {
 		list.SetItem(i, event)
@@ -165,12 +189,11 @@ func initList(events []models.RaceEvent, width, height int) list.Model {
 }
 
 // Get index of the first occurence of an event that ends after the current date
-func getInitialCursorPos(events []models.RaceEvent) int {
-	now := time.Now()
+func getInitialCursorPos(events []*models.RaceEvent) int {
 
 	pos := 0
 	for _, item := range events {
-		if item.EndsAt.After(now) {
+		if item.IsHeroEvent {
 			break
 		}
 		pos++
@@ -180,112 +203,5 @@ func getInitialCursorPos(events []models.RaceEvent) int {
 		pos = 0
 	}
 
-	tealogger.Log(fmt.Sprintf("cursor position::::%d", pos))
-
 	return pos
 }
-
-type ErrorMsg error
-type ScheduleMsg struct {
-	events []models.RaceEvent
-}
-
-// // create rootmodel.<Model> types that implement required interfaces for bubble components
-// type ScheduleModel struct {
-// 	events models.RaceEvent
-// }
-
-// // implement list.Item interface
-// func (s ScheduleModel) FilterValue() string {
-// 	return s.events.Location
-// }
-
-// func (s ScheduleModel) Title() string {
-// 	// // datetime, err := time.Parse("YYYY-MM-DDThh:mm:ssZ07:00", e.StartsAt)
-// 	// // start, err := time.Parse("2006-01-02T15:04:05-07:00", rm.e.StartsAt)
-// 	// // var (
-// 	// // 	startstr string
-// 	// // 	end      time.Time
-// 	// // 	endstr   string
-// 	// // )
-// 	// // if err != nil {
-// 	// // 	tealogger.LogErr(err)
-// 	// // 	startstr = ""
-// 	// // 	endstr = ""
-// 	// // } else {
-// 	// // 	startstr = start.Format("Jan 2")
-// 	// // 	end = start.AddDate(0, 0, 3)
-// 	// // 	endstr = strconv.Itoa(end.Day())
-// 	// // }
-
-// 	// datestr := lipgloss.NewStyle().Faint(true).Render(
-// 	// 	// fmt.Sprintf("%s - %s", startstr, endstr),
-// 	// 	"1 - 2",
-// 	// )
-
-// 	// return fmt.Sprintf("%s %s", datestr, rm.e.Location)
-// 	return "test title"
-// }
-
-// func (s ScheduleModel) Description() string {
-// 	return s.events.OfficialName
-// }
-
-// // Main Model
-// type Model struct {
-// 	schedule list.Model
-// 	err      error
-// }
-
-// func NewScheduleModel() *Model {
-// 	return &Model{}
-// }
-
-// // Styling
-// // var (
-// // 	listStyle = lipgloss.NewStyle().
-// // 			Padding(1, 2).
-// // 			Border(lipgloss.RoundedBorder()).
-// // 			BorderForeground(lipgloss.Color("FF1801"))
-// // 	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(241))
-// // )
-
-// func (m *Model) initSchedule(width, height int) {
-// 	m.schedule = list.New([]list.Item{}, list.NewDefaultDelegate(), width, height)
-// 	m.schedule.Title = "F1 Schedule"
-// 	m.schedule.SetItems([]list.Item{})
-// }
-
-// func (m Model) Init() tea.Cmd {
-// 	// f := f1scraper.New()
-// 	return nil
-// }
-
-// var (
-// 	titleStyle = lipgloss.NewStyle().
-// 		Bold(true).
-// 		Background(lipgloss.Color("#FF1801")).
-// 		Foreground(lipgloss.Color("#FFFFFF"))
-// )
-
-// func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-// 	switch msg := msg.(type) {
-// 	case tea.WindowSizeMsg:
-// 		m.initSchedule(msg.Width-4, msg.Height-4)
-// 		titleStyle.Width(msg.Width - 4)
-// 	}
-// 	var cmd tea.Cmd
-// 	m.schedule.SetShowTitle(false)
-// 	m.schedule.SetShowStatusBar(false)
-// 	m.schedule, cmd = m.schedule.Update(msg)
-// 	return m, cmd
-// }
-
-// func (m Model) View() string {
-// 	return lipgloss.JoinVertical(
-// 		lipgloss.Top,
-// 		titleStyle.Render("F1 CLI - Schedule"),
-// 		m.schedule.View(),
-// 	)
-
-// }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,17 +31,21 @@ func New() *F1ScraperClient {
 	}
 }
 
-func (f *F1ScraperClient) GetSchedule() ([]models.RaceEvent, error) {
+func (f *F1ScraperClient) GetSchedule() (*models.Schedule, error) {
 	return f.fetchSchedule()
 }
 
-func (f *F1ScraperClient) fetchSchedule() ([]models.RaceEvent, error) {
+func (f *F1ScraperClient) GetEventSessions(link string) ([]*models.RaceEventSession, error) {
+	return f.fetchEventSessions(link)
+}
+
+func (f *F1ScraperClient) fetchSchedule() (*models.Schedule, error) {
 	resp, err := f.client.R().
 		SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").
 		Get("en/racing/2024.html")
 
 	if err != nil {
-		return []models.RaceEvent{}, errors.New("fetch error")
+		return nil, errors.New("unable to fetch schedule")
 	}
 
 	body := bytes.NewReader(resp.Body())
@@ -48,41 +53,120 @@ func (f *F1ScraperClient) fetchSchedule() ([]models.RaceEvent, error) {
 	return f.parseSchedule(body)
 }
 
-func (f *F1ScraperClient) parseSchedule(body io.Reader) ([]models.RaceEvent, error) {
+func (f *F1ScraperClient) fetchEventSessions(link string) ([]*models.RaceEventSession, error) {
+	resp, err := f.client.R().
+		SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").
+		Get(link)
+
+	if err != nil {
+		return []*models.RaceEventSession{}, errors.New("unable to fetch event details")
+	}
+
+	body := bytes.NewReader(resp.Body())
+
+	return f.parseSessionDetails(body)
+}
+
+func (f *F1ScraperClient) parseSchedule(body io.Reader) (*models.Schedule, error) {
 	doc, err := goquery.NewDocumentFromReader(body)
 
 	if err != nil {
-		return []models.RaceEvent{}, errors.New("parse error")
+		return nil, errors.New("error parsing schedule response")
 	}
 
 	eventList := doc.Find("main .event-list")
-	raceCards := eventList.Find(".race-card")
+	raceCards := eventList.Find(".race-card-wrapper")
+	eventDetailLinks := eventList.Find(".event-item-link")
 
-	events := make([]models.RaceEvent, raceCards.Size())
+	events := make([]*models.RaceEvent, raceCards.Size())
 
 	raceCards.Each(func(i int, gq *goquery.Selection) {
-		events[i] = parseEvent(gq)
+		events[i] = parseEvent(eventDetailLinks, gq)
 	})
 
-	return events, nil
+	for _, event := range events {
+		if event.Upcoming {
+			event.IsHeroEvent = true
+			tealogger.Log("hero event: ", event.Location)
+			break
+		}
+	}
+
+	return &models.Schedule{
+		Events: events,
+	}, nil
 }
 
-func parseEvent(gq *goquery.Selection) models.RaceEvent {
-	location := safeNodeText(gq, ".event-place")
-	title := safeNodeText(gq, ".event-title")
-	startsAt, endsAt, err := parseEventDates(gq)
+func (f *F1ScraperClient) parseSessionDetails(body io.Reader) ([]*models.RaceEventSession, error) {
+	doc, err := goquery.NewDocumentFromReader(body)
+
+	if err != nil {
+		return []*models.RaceEventSession{}, errors.New("error parsing event details response")
+	}
+
+	eventRows := doc.Find(".f1-race-hub--timetable-listings")
+	tealogger.Log(fmt.Sprintf("event detail rows::::%d", eventRows.Size()))
+
+	return []*models.RaceEventSession{}, nil
+}
+
+func parseEvent(eventDetailLinks, raceCard *goquery.Selection) *models.RaceEvent {
+	location := safeNodeText(raceCard, ".event-place")
+	title := safeNodeText(raceCard, ".event-title")
+	round := safeNodeText(raceCard, ".card-title")
+	startsAt, endsAt, err := parseEventDates(raceCard)
 
 	if err != nil {
 		tealogger.LogErr(err)
 	}
 
-	return models.RaceEvent{
+	tealogger.Log(location)
+	tealogger.Log("\t", round)
+
+	r := &models.RaceEvent{
 		StartsAt:     startsAt,
 		EndsAt:       endsAt,
 		GmtOffset:    "",
 		Location:     location,
 		OfficialName: title,
+		Round:        round,
+		IsHeroEvent:  false,
+		Upcoming:     raceCard.Find(".upcoming").Size() > 0,
 	}
+
+	aNode := eventDetailLinks.Filter(fmt.Sprintf("a[data-roundtext='%s']", round))
+	link, exists := aNode.First().Attr("href")
+
+	if !exists {
+		tealogger.LogErr(errors.New("could not parse event detail link"))
+	}
+
+	tealogger.Log("\t", link)
+	tealogger.Log("\t", strconv.FormatBool(r.Upcoming))
+	r.EventDetailLink = link
+
+	r.Sessions = parseCurrentEventSessions(r, raceCard)
+
+	return r
+}
+
+func parseCurrentEventSessions(r *models.RaceEvent, gq *goquery.Selection) []*models.RaceEventSession {
+	sessionItems := gq.Find(".session-item")
+
+	if sessionItems.Size() < 0 {
+		return []*models.RaceEventSession{}
+	}
+
+	sessions := make([]*models.RaceEventSession, sessionItems.Size())
+
+	sessionItems.Each(func(i int, gq *goquery.Selection) {
+		name := safeNodeText(gq, ".session-name")
+		sessions = append(sessions, &models.RaceEventSession{
+			Name: name,
+		})
+	})
+
+	return sessions
 }
 
 func safeNodeText(gq *goquery.Selection, selector string) string {
