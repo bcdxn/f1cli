@@ -35,7 +35,7 @@ func windowSizeMsgHandler(s teaAppState, msg tea.WindowSizeMsg) (teaAppState, te
 	if s.isLoading {
 		return s, fetchScheduleCmd()
 	} else {
-		s.list.SetSize(s.width, s.height)
+		s.list.SetSize(s.width, s.height-s.hero.Height())
 		s.list.Styles.Title = titleStyle.Width(s.width - 5)
 	}
 	return s, nil
@@ -52,7 +52,7 @@ func keyMsgHandler(s teaAppState, msg tea.KeyMsg) (teaAppState, tea.Cmd) {
 // fetch the event details of the 'Hero' event, i.e. the next updcoming or current event
 func scheduleMsgHandler(s teaAppState, msg ScheduleMsg) (teaAppState, tea.Cmd) {
 	s.schedule = msg.schedule
-	s.list = initList(s.schedule.Events, s.width, s.height)
+	s.list = initList(s.schedule.Events, s.width, s.height-s.hero.Height())
 	s.isLoading = false
 	return s, fetchEventDetailsCmd(s.schedule.GetHeroEvent())
 }
@@ -60,10 +60,11 @@ func scheduleMsgHandler(s teaAppState, msg ScheduleMsg) (teaAppState, tea.Cmd) {
 // eventDetailsHandler initializes the schedule 'Hero' event with the event details data.
 func eventDetailsMsgHandler(s teaAppState, msg EventDetailsMsg) (teaAppState, tea.Cmd) {
 	hero := s.schedule.GetHeroEvent()
-	hero.Sessions = msg.sessions
 	s.schedule.HeroEvent = hero
 	s.hero = NewHero(hero.Sessions, s.width, s.height)
-	return s, nil
+	var cmd tea.Cmd
+	s.hero, cmd = s.hero.Update(msg)
+	return s, cmd
 }
 
 // the defaultHandler is invoked when no matching event is found

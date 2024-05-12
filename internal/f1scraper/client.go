@@ -135,6 +135,11 @@ func (f *F1ScraperClient) parseSessionDetails(body io.Reader) ([]*models.RaceEve
 
 	tealogger.Log(fmt.Sprintf("found %d sessions", len(sessions)))
 
+	// The site puts the events in reverse chronological order; reverse it so it's chronological
+	for i, j := 0, len(sessions)-1; i < j; i, j = i+1, j-1 {
+		sessions[i], sessions[j] = sessions[j], sessions[i]
+	}
+
 	return sessions, nil
 }
 
@@ -173,28 +178,7 @@ func parseEvent(eventDetailLinks, raceCard *goquery.Selection) *models.RaceEvent
 	tealogger.Log("\t", strconv.FormatBool(r.Upcoming))
 	r.EventDetailLink = link
 
-	r.Sessions = parseCurrentEventSessions(r, raceCard)
-
 	return r
-}
-
-func parseCurrentEventSessions(r *models.RaceEvent, gq *goquery.Selection) []*models.RaceEventSession {
-	sessionItems := gq.Find(".session-item")
-
-	if sessionItems.Size() < 0 {
-		return []*models.RaceEventSession{}
-	}
-
-	sessions := make([]*models.RaceEventSession, sessionItems.Size())
-
-	sessionItems.Each(func(i int, gq *goquery.Selection) {
-		name := safeNodeText(gq, ".session-name")
-		sessions = append(sessions, &models.RaceEventSession{
-			Name: name,
-		})
-	})
-
-	return sessions
 }
 
 func safeNodeText(gq *goquery.Selection, selector string) string {

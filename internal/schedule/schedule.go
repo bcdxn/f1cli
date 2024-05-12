@@ -61,7 +61,11 @@ func (s teaAppState) View() string {
 			s.loadingMsg,
 		))
 	} else {
-		str = docStyle.Render(s.list.View())
+		str = docStyle.Render(lipgloss.JoinVertical(
+			lipgloss.Top,
+			s.list.View(),
+			s.hero.View(),
+		))
 	}
 	// else {
 	// 	str = lipgloss.JoinVertical(
@@ -74,7 +78,7 @@ func (s teaAppState) View() string {
 	// }
 
 	if s.isQuitting {
-		return str + "\n"
+		return str + "\n\n"
 	}
 
 	return str
