@@ -29,7 +29,7 @@ func fetchScheduleCmd() tea.Cmd {
 func fetchEventDetailsCmd(event *models.RaceEvent) tea.Cmd {
 	return func() tea.Msg {
 		f := f1scraper.New()
-		sessions, err := f.GetEventSessions(event.Location)
+		sessions, err := f.GetEventSessions(event.EventDetailLink)
 
 		if err != nil {
 			tealogger.LogErr(err)

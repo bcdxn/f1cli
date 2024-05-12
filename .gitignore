@@ -9,6 +9,7 @@
 *.dylib
 f1
 
+tmp
 mock-res
 
 # Test binary, built with `go test -c`

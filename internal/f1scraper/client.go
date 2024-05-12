@@ -19,6 +19,16 @@ const (
 	baseUrl = "https://www.formula1.com"
 )
 
+var (
+	eventClasses = map[string]string{
+		".js-race":       "Race",
+		".js-qualifying": "Qualifying",
+		".js-practice-3": "Practice 3",
+		".js-practice-2": "Practice 2",
+		".js-practice-1": "Practice 1",
+	}
+)
+
 type F1ScraperClient struct {
 	client *resty.Client
 }
@@ -104,10 +114,28 @@ func (f *F1ScraperClient) parseSessionDetails(body io.Reader) ([]*models.RaceEve
 		return []*models.RaceEventSession{}, errors.New("error parsing event details response")
 	}
 
-	eventRows := doc.Find(".f1-race-hub--timetable-listings")
-	tealogger.Log(fmt.Sprintf("event detail rows::::%d", eventRows.Size()))
+	eventRows := doc.Find(".f1-race-hub--timetable-listings").Children().Filter(".row")
 
-	return []*models.RaceEventSession{}, nil
+	sessions := make([]*models.RaceEventSession, 0, eventRows.Size())
+
+	eventRows.Each(func(i int, s *goquery.Selection) {
+		c, _ := s.Attr("class")
+		tealogger.Log(fmt.Sprintf("div %s", c))
+	})
+
+	for c, t := range eventClasses {
+		selection := eventRows.Filter(c)
+		if selection.Size() == 1 {
+			sessions = append(sessions, &models.RaceEventSession{
+				Name:     t,
+				StartsAt: parseSessionTime(selection),
+			})
+		}
+	}
+
+	tealogger.Log(fmt.Sprintf("found %d sessions", len(sessions)))
+
+	return sessions, nil
 }
 
 func parseEvent(eventDetailLinks, raceCard *goquery.Selection) *models.RaceEvent {
@@ -216,4 +244,23 @@ func parseEventDates(gq *goquery.Selection) (time.Time, time.Time, error) {
 	endsAt, err := time.Parse("2006-Jan-2", fmt.Sprintf("%s-%s-%s", year, endsMonth, endsDate))
 
 	return startsAt, endsAt, err
+}
+
+func parseSessionTime(gq *goquery.Selection) time.Time {
+	var startTime time.Time
+	start, sExists := gq.Attr("data-start-time")
+
+	if !sExists {
+		tealogger.LogErr(errors.New("could not parse session start time"))
+		return startTime
+	}
+
+	t, err := time.Parse("2006-01-02T15:04:05", start)
+
+	if err != nil {
+		tealogger.LogErr(fmt.Errorf("invalid start time format - %s", start))
+		return startTime
+	}
+
+	return t
 }

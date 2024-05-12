@@ -16,4 +16,5 @@ type teaAppState struct {
 	spinner    spinner.Model
 	schedule   *models.Schedule
 	list       list.Model
+	hero       heroModel
 }

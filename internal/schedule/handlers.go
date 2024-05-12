@@ -1,10 +1,7 @@
 package schedule
 
 import (
-	"fmt"
-
 	"github.com/bcdxn/f1cli/internal/models"
-	"github.com/bcdxn/f1cli/internal/tealogger"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -18,24 +15,28 @@ var (
 	f1RedText  = lipgloss.NewStyle().Foreground(lipgloss.Color(f1Red))
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Background(lipgloss.Color("#FF1801")).
-			Foreground(lipgloss.Color("#FFFFFF"))
+			Background(lipgloss.Color(f1Red)).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			PaddingLeft(1)
 	selectedStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color(f1Red)).
 			BorderForeground(lipgloss.Color(f1Red)).
-			PaddingLeft(1)
+			PaddingLeft(2)
 )
 
 // Handlers should return the updated app state and a command (or nil)
 
 // The window size msg handler is the first event fired after Init
 func windowSizeMsgHandler(s teaAppState, msg tea.WindowSizeMsg) (teaAppState, tea.Cmd) {
-	s.width = msg.Width
-	s.height = msg.Height
+	h, v := docStyle.GetFrameSize()
+	s.width = msg.Width - h
+	s.height = msg.Height - v
+
 	if s.isLoading {
 		return s, fetchScheduleCmd()
 	} else {
-		s.list.SetSize(s.width-1, s.height-2)
+		s.list.SetSize(s.width, s.height)
+		s.list.Styles.Title = titleStyle.Width(s.width - 5)
 	}
 	return s, nil
 }
@@ -51,17 +52,17 @@ func keyMsgHandler(s teaAppState, msg tea.KeyMsg) (teaAppState, tea.Cmd) {
 // fetch the event details of the 'Hero' event, i.e. the next updcoming or current event
 func scheduleMsgHandler(s teaAppState, msg ScheduleMsg) (teaAppState, tea.Cmd) {
 	s.schedule = msg.schedule
-	s.list = initList(s.schedule.Events, s.width-1, s.height-2)
+	s.list = initList(s.schedule.Events, s.width, s.height)
 	s.isLoading = false
 	return s, fetchEventDetailsCmd(s.schedule.GetHeroEvent())
 }
 
 // eventDetailsHandler initializes the schedule 'Hero' event with the event details data.
 func eventDetailsMsgHandler(s teaAppState, msg EventDetailsMsg) (teaAppState, tea.Cmd) {
-	tealogger.Log(fmt.Sprintf("sessions:::%d", len(msg.sessions)))
 	hero := s.schedule.GetHeroEvent()
 	hero.Sessions = msg.sessions
 	s.schedule.HeroEvent = hero
+	s.hero = NewHero(hero.Sessions, s.width, s.height)
 	return s, nil
 }
 
@@ -80,9 +81,10 @@ func initList(events []*models.RaceEvent, width, height int) list.Model {
 	d.Styles.SelectedDesc = selectedStyle.Inherit(d.Styles.SelectedDesc)
 
 	list := list.New(make([]list.Item, len(events)), d, width, height)
-	list.SetShowTitle(false)
+	list.Title = "Schedule"
 	list.SetShowStatusBar(false)
-	list.Styles.Spinner = d.Styles.SelectedTitle.Foreground(lipgloss.Color(f1Red))
+	list.SetShowHelp(false)
+	list.Styles.Title = titleStyle.Width(width - 5)
 
 	for i, event := range events {
 		list.SetItem(i, event)

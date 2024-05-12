@@ -9,6 +9,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+var docStyle = lipgloss.NewStyle().Margin(1, 2)
+
 // Create a new application state object (called models in bubbletea)
 func newTeaAppState() teaAppState {
 	s := spinner.New()
@@ -20,7 +22,7 @@ func newTeaAppState() teaAppState {
 		height:     0,
 		isLoading:  true,
 		isQuitting: false,
-		loadingMsg: "Retrieving F1 schedule...",
+		loadingMsg: f1RedText.Render("Retrieving F1 schedule..."),
 		spinner:    s,
 	}
 }
@@ -54,19 +56,22 @@ func (s teaAppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (s teaAppState) View() string {
 	str := ""
 	if s.isLoading {
-		str = fmt.Sprintf(
+		str = docStyle.Render(fmt.Sprintf(
 			"%s %s", s.spinner.View(),
-			f1RedText.Render(s.loadingMsg),
-			// lipgloss.NewStyle().Foreground(lipgloss.Color(f1Red)).Render(s.loadingMsg),
-		)
+			s.loadingMsg,
+		))
 	} else {
-		str = lipgloss.JoinVertical(
-			lipgloss.Top,
-			"",
-			titleStyle.Width(s.width).Render("Schedule"),
-			s.list.View(),
-		)
+		str = docStyle.Render(s.list.View())
 	}
+	// else {
+	// 	str = lipgloss.JoinVertical(
+	// 		lipgloss.Top,
+	// 		"",
+	// 		titleStyle.Width(s.width).Render("Schedule"),
+	// 		s.list.View(),
+	// 		s.hero.View(),
+	// 	)
+	// }
 
 	if s.isQuitting {
 		return str + "\n"
