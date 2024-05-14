@@ -60,22 +60,15 @@ func (s teaAppState) View() string {
 			"%s %s", s.spinner.View(),
 			s.loadingMsg,
 		))
-	} else {
+	} else if s.hero.sessions != nil && len(s.hero.sessions) > 0 {
 		str = docStyle.Render(lipgloss.JoinVertical(
 			lipgloss.Top,
 			s.list.View(),
 			s.hero.View(),
 		))
+	} else {
+		str = docStyle.Render(s.list.View())
 	}
-	// else {
-	// 	str = lipgloss.JoinVertical(
-	// 		lipgloss.Top,
-	// 		"",
-	// 		titleStyle.Width(s.width).Render("Schedule"),
-	// 		s.list.View(),
-	// 		s.hero.View(),
-	// 	)
-	// }
 
 	if s.isQuitting {
 		return str + "\n\n"

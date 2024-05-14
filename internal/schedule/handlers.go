@@ -1,7 +1,10 @@
 package schedule
 
 import (
+	"fmt"
+
 	"github.com/bcdxn/f1cli/internal/models"
+	"github.com/bcdxn/f1cli/internal/tealogger"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -32,13 +35,24 @@ func windowSizeMsgHandler(s teaAppState, msg tea.WindowSizeMsg) (teaAppState, te
 	s.width = msg.Width - h
 	s.height = msg.Height - v
 
+	s.hero.SetSize(msg.Width - h - 5)
+	tealogger.Log(fmt.Sprintf("window size manager set jhero size %d", msg.Width-h-5))
 	if s.isLoading {
 		return s, fetchScheduleCmd()
 	} else {
-		s.list.SetSize(s.width, s.height-s.hero.Height())
-		s.list.Styles.Title = titleStyle.Width(s.width - 5)
+		w, h := getListSize(s)
+		s.list.SetSize(w, h)
+		s.list.Styles.Title = titleStyle.Width(w - 5)
 	}
 	return s, nil
+}
+
+func getListSize(s teaAppState) (int, int) {
+	if s.hero.sessions != nil && len(s.hero.sessions) > 0 {
+		return s.width, s.height - s.hero.Height()
+	} else {
+		return s.width, s.height
+	}
 }
 
 // keyMsgHandler handles key inputs that update the list (e.g. changing the selected item)
@@ -52,7 +66,7 @@ func keyMsgHandler(s teaAppState, msg tea.KeyMsg) (teaAppState, tea.Cmd) {
 // fetch the event details of the 'Hero' event, i.e. the next updcoming or current event
 func scheduleMsgHandler(s teaAppState, msg ScheduleMsg) (teaAppState, tea.Cmd) {
 	s.schedule = msg.schedule
-	s.list = initList(s.schedule.Events, s.width, s.height-s.hero.Height())
+	s.list = initList(s)
 	s.isLoading = false
 	return s, fetchEventDetailsCmd(s.schedule.GetHeroEvent())
 }
@@ -61,9 +75,12 @@ func scheduleMsgHandler(s teaAppState, msg ScheduleMsg) (teaAppState, tea.Cmd) {
 func eventDetailsMsgHandler(s teaAppState, msg EventDetailsMsg) (teaAppState, tea.Cmd) {
 	hero := s.schedule.GetHeroEvent()
 	s.schedule.HeroEvent = hero
-	s.hero = NewHero(hero.Sessions, s.width, s.height)
+	s.hero = NewHero(hero.Sessions, s.hero.Width(), 10)
 	var cmd tea.Cmd
 	s.hero, cmd = s.hero.Update(msg)
+	w, h := getListSize(s)
+	s.list.SetSize(w, h)
+	s.list.Styles.Title = titleStyle.Width(w - 5)
 	return s, cmd
 }
 
@@ -75,23 +92,24 @@ func defaultHandler(s teaAppState, msg tea.Msg) (teaAppState, tea.Cmd) {
 }
 
 // initList customizes and initializes the bubbles list component
-func initList(events []*models.RaceEvent, width, height int) list.Model {
+func initList(s teaAppState) list.Model {
 	d := list.NewDefaultDelegate()
 
 	d.Styles.SelectedTitle = selectedStyle.Inherit(d.Styles.SelectedTitle)
 	d.Styles.SelectedDesc = selectedStyle.Inherit(d.Styles.SelectedDesc)
 
-	list := list.New(make([]list.Item, len(events)), d, width, height)
+	w, h := getListSize(s)
+	list := list.New(make([]list.Item, len(s.schedule.Events)), d, w, h)
 	list.Title = "Schedule"
 	list.SetShowStatusBar(false)
 	list.SetShowHelp(false)
-	list.Styles.Title = titleStyle.Width(width - 5)
+	list.Styles.Title = titleStyle.Width(w)
 
-	for i, event := range events {
+	for i, event := range s.schedule.Events {
 		list.SetItem(i, event)
 	}
 
-	pos := getInitialCursorPos(events)
+	pos := getInitialCursorPos(s.schedule.Events)
 
 	for i := 0; i < pos; i++ {
 		list.CursorDown()

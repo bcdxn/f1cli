@@ -3,6 +3,7 @@ package schedule
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bcdxn/f1cli/internal/models"
 	"github.com/bcdxn/f1cli/internal/tealogger"
@@ -27,15 +28,14 @@ type heroModel struct {
 func NewHero(sessions []*models.RaceEventSession, width, height int) heroModel {
 	m := heroModel{
 		sessions: sessions,
-		width:    width - 2,
+		width:    width,
 	}
 
 	return m
 }
 
-func (m *heroModel) SetSize(width, height int) {
-	h, _ := docStyle.GetFrameSize()
-	m.width = width - h
+func (m *heroModel) SetSize(width int) {
+	m.width = width
 }
 
 func (m heroModel) Update(msg tea.Msg) (heroModel, tea.Cmd) {
@@ -53,13 +53,19 @@ func (m heroModel) Height() int {
 	return 10
 }
 
+func (m heroModel) Width() int {
+	return m.width
+}
+
 func (m heroModel) View() string {
 
 	str := make([]string, 0, len(m.sessions))
+	t := time.Now()
+	loc := t.Location()
 
 	for _, session := range m.sessions {
-		str = append(str, session.Name+" "+session.StartsAt.Format("15:04 MST"))
+		str = append(str, session.Name+" -- "+session.StartsAt.In(loc).Format("15:04pm MST"))
 	}
 
-	return heroStyle.Render(strings.Join(str, "\n"))
+	return heroStyle.Width(m.width).Render(strings.Join(str, "\n"))
 }

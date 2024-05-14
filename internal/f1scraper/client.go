@@ -20,12 +20,14 @@ const (
 )
 
 var (
-	eventClasses = map[string]string{
-		".js-race":       "Race",
-		".js-qualifying": "Qualifying",
-		".js-practice-3": "Practice 3",
-		".js-practice-2": "Practice 2",
-		".js-practice-1": "Practice 1",
+	eventClasses = []string{
+		".js-practice-1",
+		".js-practice-2",
+		".js-practice-3",
+		".js-sprint-qualifying",
+		".js-print-race",
+		".js-qualifying",
+		".js-race",
 	}
 )
 
@@ -123,22 +125,17 @@ func (f *F1ScraperClient) parseSessionDetails(body io.Reader) ([]*models.RaceEve
 		tealogger.Log(fmt.Sprintf("div %s", c))
 	})
 
-	for c, t := range eventClasses {
+	for _, c := range eventClasses {
 		selection := eventRows.Filter(c)
 		if selection.Size() == 1 {
 			sessions = append(sessions, &models.RaceEventSession{
-				Name:     t,
+				Name:     safeNodeText(selection, ".f1-timetable--title"),
 				StartsAt: parseSessionTime(selection),
 			})
 		}
 	}
 
 	tealogger.Log(fmt.Sprintf("found %d sessions", len(sessions)))
-
-	// The site puts the events in reverse chronological order; reverse it so it's chronological
-	for i, j := 0, len(sessions)-1; i < j; i, j = i+1, j-1 {
-		sessions[i], sessions[j] = sessions[j], sessions[i]
-	}
 
 	return sessions, nil
 }
@@ -233,18 +230,26 @@ func parseEventDates(gq *goquery.Selection) (time.Time, time.Time, error) {
 func parseSessionTime(gq *goquery.Selection) time.Time {
 	var startTime time.Time
 	start, sExists := gq.Attr("data-start-time")
+	offset, oExists := gq.Attr("data-gmt-offset")
+
+	tealogger.Log("gmt offset", offset)
 
 	if !sExists {
 		tealogger.LogErr(errors.New("could not parse session start time"))
 		return startTime
 	}
 
-	t, err := time.Parse("2006-01-02T15:04:05", start)
+	if !oExists {
+		tealogger.LogErr(errors.New("could not parse session gmt offset"))
+		return startTime
+	}
+
+	t, err := time.Parse("2006-01-02T15:04:05 -07:00", fmt.Sprintf("%s %s", start, offset))
 
 	if err != nil {
 		tealogger.LogErr(fmt.Errorf("invalid start time format - %s", start))
 		return startTime
 	}
 
-	return t
+	return t.UTC()
 }

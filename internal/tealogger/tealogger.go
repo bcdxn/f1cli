@@ -19,7 +19,7 @@ func LogErr(err error) {
 		fmt.Println(err)
 		os.Exit(1)
 	} else {
-		f.WriteString(fmt.Sprintf("error - %s", err.Error()))
+		f.WriteString(fmt.Sprintf("error - %s\n", err.Error()))
 	}
 	defer f.Close()
 }
