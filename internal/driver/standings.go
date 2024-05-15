@@ -41,7 +41,7 @@ func newTeaAppState(o StandingsOptions, sc f1scraper.F1ScraperClient, l tealogge
 		height:     0,
 		isLoading:  true,
 		isQuitting: false,
-		loadingMsg: styles.F1RedText.Render("Retrieving F1 Drivers Champtionship standings..."),
+		loadingMsg: styles.F1RedText.Render("Retrieving F1 Drivers Championship standings..."),
 		spinner:    s,
 		sc:         sc,
 		l:          l,
