@@ -1,11 +1,11 @@
 package schedule
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/bcdxn/f1cli/internal/models"
+	"github.com/bcdxn/f1cli/internal/styles"
 	"github.com/bcdxn/f1cli/internal/tealogger"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -14,21 +14,24 @@ import (
 var (
 	heroStyle = lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(f1Red)).
-		Foreground(lipgloss.Color(f1Red)).
+		BorderForeground(lipgloss.Color(styles.F1Red)).
+		Foreground(lipgloss.Color(styles.F1Red)).
 		MarginTop(1).
 		Padding(1)
 )
 
 type heroModel struct {
-	sessions []*models.RaceEventSession
-	width    int
+	gmtOffset string
+	sessions  []*models.RaceEventSession
+	width     int
+	l         tealogger.TeaLogger
 }
 
-func NewHero(sessions []*models.RaceEventSession, width, height int) heroModel {
+func NewHero(logger tealogger.TeaLogger, sessions []*models.RaceEventSession, width, height int) heroModel {
 	m := heroModel{
 		sessions: sessions,
 		width:    width,
+		l:        logger,
 	}
 
 	return m
@@ -41,7 +44,7 @@ func (m *heroModel) SetSize(width int) {
 func (m heroModel) Update(msg tea.Msg) (heroModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case EventDetailsMsg:
-		tealogger.Log(fmt.Sprintf("SESSIONS:%d", len(msg.sessions)))
+		m.l.Debugf("SESSIONS:%d", len(msg.sessions))
 		m.sessions = msg.sessions
 		return m, nil
 	default:

@@ -1,38 +1,23 @@
 package schedule
 
 import (
-	"errors"
-
-	"github.com/bcdxn/f1cli/internal/f1scraper"
-	"github.com/bcdxn/f1cli/internal/models"
-	"github.com/bcdxn/f1cli/internal/tealogger"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func fetchScheduleCmd() tea.Cmd {
+func fetchScheduleCmd(s teaAppState) tea.Cmd {
 	return func() tea.Msg {
-		f := f1scraper.New()
-
-		schedule, err := f.GetSchedule()
-
-		if err != nil {
-			tealogger.LogErr(err)
-			return ErrorMsg(errors.New("error fetching schedule"))
-		}
-
 		return ScheduleMsg{
-			schedule: schedule,
+			schedule: s.sc.GetSchedule(),
 		}
 	}
 }
 
-func fetchEventDetailsCmd(event *models.RaceEvent) tea.Cmd {
+func fetchEventDetailsCmd(s teaAppState) tea.Cmd {
 	return func() tea.Msg {
-		f := f1scraper.New()
-		sessions, err := f.GetEventSessions(event.EventDetailLink)
+		sessions, err := s.sc.GetEventSessions(s.schedule.GetHeroEvent().EventDetailLink)
 
 		if err != nil {
-			tealogger.LogErr(err)
+			s.l.LogErr(err)
 		}
 
 		return EventDetailsMsg{

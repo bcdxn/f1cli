@@ -1,29 +1,19 @@
 package schedule
 
 import (
-	"fmt"
-
 	"github.com/bcdxn/f1cli/internal/models"
-	"github.com/bcdxn/f1cli/internal/tealogger"
+	"github.com/bcdxn/f1cli/internal/styles"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-const (
-	f1Red = "#FF1801"
-)
-
 var (
-	f1RedText  = lipgloss.NewStyle().Foreground(lipgloss.Color(f1Red))
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Background(lipgloss.Color(f1Red)).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			PaddingLeft(1)
+	f1RedText = lipgloss.NewStyle().Foreground(lipgloss.Color(styles.F1Red))
+
 	selectedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(f1Red)).
-			BorderForeground(lipgloss.Color(f1Red)).
+			Foreground(lipgloss.Color(styles.F1Red)).
+			BorderForeground(lipgloss.Color(styles.F1Red)).
 			PaddingLeft(2)
 )
 
@@ -36,13 +26,13 @@ func windowSizeMsgHandler(s teaAppState, msg tea.WindowSizeMsg) (teaAppState, te
 	s.height = msg.Height - v
 
 	s.hero.SetSize(msg.Width - h - 5)
-	tealogger.Log(fmt.Sprintf("window size manager set jhero size %d", msg.Width-h-5))
+	s.l.Debugf("window size manager set jhero size %d", msg.Width-h-5)
 	if s.isLoading {
-		return s, fetchScheduleCmd()
+		return s, fetchScheduleCmd(s)
 	} else {
 		w, h := getListSize(s)
 		s.list.SetSize(w, h)
-		s.list.Styles.Title = titleStyle.Width(w - 5)
+		s.list.Styles.Title = styles.Title.Width(w - 5)
 	}
 	return s, nil
 }
@@ -68,19 +58,19 @@ func scheduleMsgHandler(s teaAppState, msg ScheduleMsg) (teaAppState, tea.Cmd) {
 	s.schedule = msg.schedule
 	s.list = initList(s)
 	s.isLoading = false
-	return s, fetchEventDetailsCmd(s.schedule.GetHeroEvent())
+	return s, fetchEventDetailsCmd(s)
 }
 
 // eventDetailsHandler initializes the schedule 'Hero' event with the event details data.
 func eventDetailsMsgHandler(s teaAppState, msg EventDetailsMsg) (teaAppState, tea.Cmd) {
 	hero := s.schedule.GetHeroEvent()
 	s.schedule.HeroEvent = hero
-	s.hero = NewHero(hero.Sessions, s.hero.Width(), 10)
+	s.hero = NewHero(s.l, hero.Sessions, s.hero.Width(), 10)
 	var cmd tea.Cmd
 	s.hero, cmd = s.hero.Update(msg)
 	w, h := getListSize(s)
 	s.list.SetSize(w, h)
-	s.list.Styles.Title = titleStyle.Width(w - 5)
+	s.list.Styles.Title = styles.Title.Width(w - 5)
 	return s, cmd
 }
 
@@ -103,7 +93,7 @@ func initList(s teaAppState) list.Model {
 	list.Title = "Schedule"
 	list.SetShowStatusBar(false)
 	list.SetShowHelp(false)
-	list.Styles.Title = titleStyle.Width(w)
+	list.Styles.Title = styles.Title.Width(w)
 
 	for i, event := range s.schedule.Events {
 		list.SetItem(i, event)

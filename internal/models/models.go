@@ -14,6 +14,21 @@ type Schedule struct {
 }
 
 type RaceEvent struct {
+	logger          tealogger.TeaLogger
+	StartsAt        time.Time
+	EndsAt          time.Time
+	GmtOffset       string
+	Location        string
+	OfficialName    string
+	Sessions        []*RaceEventSession
+	Round           string
+	EventDetailLink string
+	Upcoming        bool
+	IsHeroEvent     bool
+}
+
+type RaceEventOptions struct {
+	Logger          tealogger.TeaLogger
 	StartsAt        time.Time
 	EndsAt          time.Time
 	GmtOffset       string
@@ -29,6 +44,13 @@ type RaceEvent struct {
 type RaceEventSession struct {
 	Name     string
 	StartsAt time.Time
+}
+
+type DriverStanding struct {
+	Pos         string
+	Name        string
+	Constructor string
+	Points      string
 }
 
 func (s Schedule) GetHeroEvent() *RaceEvent {
@@ -93,7 +115,7 @@ func (r RaceEvent) GetSessionDate(startDay, startTime string) time.Time {
 	sessionDateTime, err := time.Parse("", fmt.Sprintf("%d-%d-%d %s", year, month, day, startTime))
 
 	if err != nil {
-		tealogger.LogErr(err)
+		r.logger.LogErr(err)
 	}
 
 	return sessionDateTime

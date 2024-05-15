@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/bcdxn/f1cli/internal/f1scraper"
+	"github.com/bcdxn/f1cli/internal/tealogger"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -12,18 +14,21 @@ import (
 var docStyle = lipgloss.NewStyle().Margin(1, 2)
 
 // Create a new application state object (called models in bubbletea)
-func newTeaAppState() teaAppState {
+func newTeaAppState(o ScheduleOptions, sc f1scraper.F1ScraperClient, l tealogger.TeaLogger) teaAppState {
 	s := spinner.New()
 	s.Spinner = spinner.MiniDot
 	s.Style = f1RedText
 
 	return teaAppState{
-		width:      0,
-		height:     0,
-		isLoading:  true,
-		isQuitting: false,
-		loadingMsg: f1RedText.Render("Retrieving F1 schedule..."),
-		spinner:    s,
+		width:             0,
+		height:            0,
+		isLoading:         true,
+		isQuitting:        false,
+		loadingMsg:        f1RedText.Render("Retrieving F1 schedule..."),
+		spinner:           s,
+		displayTrackTimes: o.DisplayTrackTimes,
+		sc:                sc,
+		l:                 l,
 	}
 }
 
@@ -77,9 +82,17 @@ func (s teaAppState) View() string {
 	return str
 }
 
+type ScheduleOptions struct {
+	DisplayTrackTimes bool
+	Debug             bool
+}
+
 // Run the bubbletea program
-func RunProgram() {
-	p := tea.NewProgram(newTeaAppState())
+func RunProgram(o ScheduleOptions) {
+	l := tealogger.New(o.Debug)
+	f := f1scraper.New(l)
+	l.Debug("running schedule program")
+	p := tea.NewProgram(newTeaAppState(o, *f, l), tea.WithAltScreen())
 
 	_, err := p.Run()
 	if err != nil {
