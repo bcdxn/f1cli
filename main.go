@@ -9,17 +9,17 @@ import (
 )
 
 func main() {
-	fmt.Println("running...")
-
 	i := make(chan os.Signal, 1)
-	d := make(chan bool)
-
 	signal.Notify(i, os.Interrupt)
-
+	d := make(chan struct{})
 	weatherEvents := make(chan f1livetiming.WeatherDataEvent)
 
-	c := f1livetiming.NewClient(i, d, weatherEvents)
-	c.Negotiate()
+	c := f1livetiming.NewClient(i, d, f1livetiming.WithWeatherEvents(weatherEvents))
+	err := c.Negotiate()
+	if err != nil {
+		panic(err)
+	}
+	// fmt.Println(c.ConnectionToken)
 	go c.Connect()
 	<-d // wait
 	fmt.Println("done!")
