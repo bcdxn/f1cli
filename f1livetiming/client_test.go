@@ -66,19 +66,29 @@ func TestConnectWithoutNegotiate(t *testing.T) {
 }
 
 // TestConnectWait ensures that the caller is properly notified when the client shuts down
-func TestConnectAfterNegotiate(t *testing.T) {
+func TestConnectSubscribe(t *testing.T) {
 	i := make(chan struct{})
 	d := make(chan error)
 
-	ts, _ := newWSTestServer(t)
+	ts, _ := newWSTestServer(t, func() websocket.Handler {
+		return func(conn *websocket.Conn) {
+			defer conn.Close()
+			var msg string
+			websocket.Message.Receive(conn, &msg)
+
+			re := regexp.MustCompile(`"M": "Subscribe",`)
+			if !re.MatchString(msg) {
+				t.Errorf("expected first message to be a Subscribe message, but found %s", msg)
+			}
+			close(i)
+		}
+	}())
 	defer ts.Close()
 
 	c := NewClient(i, d, WithHTTPBaseURL(ts.URL), WithWSBaseURL(httpToWs(t, ts.URL)))
 
 	c.Negotiate()
 	go c.Connect()
-
-	close(c.Interrupt)
 
 	err := <-d
 	if err != nil {
@@ -156,7 +166,7 @@ func newHttpTestServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-func newWSTestServer(t *testing.T, msgsToSend ...string) (*httptest.Server, *websocket.Server) {
+func newWSTestServer(t *testing.T, h websocket.Handler, msgsToSend ...string) (*httptest.Server, *websocket.Server) {
 	t.Helper()
 
 	mux := http.NewServeMux()
@@ -182,15 +192,16 @@ func newWSTestServer(t *testing.T, msgsToSend ...string) (*httptest.Server, *web
 	var ws websocket.Server
 	mux.HandleFunc("/signalr/connect", func(w http.ResponseWriter, r *http.Request) {
 		ws = websocket.Server{
-			Handler: func(conn *websocket.Conn) {
-				defer conn.Close()
-				var msg string
-				websocket.Message.Receive(conn, &msg)
-				// Send message
-				for _, msgToSend := range msgsToSend {
-					websocket.Message.Send(conn, msgToSend)
-				}
-			},
+			Handler: h,
+			// func(conn *websocket.Conn) {
+			// 	defer conn.Close()
+			// 	var msg string
+			// 	websocket.Message.Receive(conn, &msg)
+			// 	// Send message
+			// 	for _, msgToSend := range msgsToSend {
+			// 		websocket.Message.Send(conn, msgToSend)
+			// 	}
+			// },
 		}
 		ws.ServeHTTP(w, r)
 	})
