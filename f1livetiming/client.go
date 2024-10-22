@@ -2,38 +2,40 @@ package f1livetiming
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 
 	"golang.org/x/net/websocket"
 )
 
 type Client struct {
-	Interrupt         chan os.Signal
-	Done              chan struct{}
-	WeatherDataEvents chan WeatherDataEvent
-	ConnectionToken   string
-	Cookie            string
-	BaseURL           string
+	Interrupt       chan struct{}
+	Done            chan error
+	WeatherChannel  chan WeatherDataEvent
+	ConnectionToken string
+	Cookie          string
+	HTTPBaseURL     string
+	WSBaseURL       string
 }
 
 // NewClient creates and returns a new F1 LiveTiming Client for retrieving real-time data from
 // active F1 sessions.
 func NewClient(
 	// Client will gracefully close websocket when interrupt signal is received
-	interrupt chan os.Signal,
-	// Client will signal to parents that the websocket has been closed; parents should wait for this
-	// signal before closing
-	done chan struct{},
+	interruptChannel chan struct{},
+	// Client will signal to callers that the websocket is closed on this channel. It may also contain
+	// errors
+	doneChannel chan error,
 	opts ...ClientOption,
 ) *Client {
 	c := &Client{
-		Interrupt: interrupt,
-		Done:      done,
-		BaseURL:   "https://livetiming.formula1.com",
+		Interrupt:   interruptChannel,
+		Done:        doneChannel,
+		HTTPBaseURL: "https://livetiming.formula1.com",
+		WSBaseURL:   "https://livetiming.formula1.com",
 	}
 
 	for _, opt := range opts {
@@ -45,15 +47,21 @@ func NewClient(
 
 type ClientOption = func(c *Client)
 
-func WithBaseURL(baseUrl string) ClientOption {
+func WithHTTPBaseURL(baseUrl string) ClientOption {
 	return func(c *Client) {
-		c.BaseURL = baseUrl
+		c.HTTPBaseURL = baseUrl
 	}
 }
 
-func WithWeatherEvents(weatherEvents chan WeatherDataEvent) ClientOption {
+func WithWSBaseURL(baseUrl string) ClientOption {
 	return func(c *Client) {
-		c.WeatherDataEvents = weatherEvents
+		c.WSBaseURL = baseUrl
+	}
+}
+
+func WithWeatherChannel(weatherEvents chan WeatherDataEvent) ClientOption {
+	return func(c *Client) {
+		c.WeatherChannel = weatherEvents
 	}
 }
 
@@ -71,9 +79,9 @@ type NegotiateResponse struct {
 }
 
 func (c *Client) Negotiate() error {
-	u, err := url.Parse(c.BaseURL)
+	u, err := url.Parse(c.HTTPBaseURL)
 	if err != nil {
-		return fmt.Errorf("invalid BaseURL: %w", err)
+		return fmt.Errorf("invalid HTTPBaseURL: %w", err)
 	}
 
 	resp, err := http.DefaultClient.Do(&http.Request{
@@ -103,25 +111,64 @@ func (c *Client) Negotiate() error {
 		c.Cookie = resp.Header.Get("set-cookie")
 		return nil
 	default:
-		return fmt.Errorf("error negotiating f1 livetiming api connection: %w", err)
+		return fmt.Errorf("error negotiating f1 livetiming api connection: %w", errors.New(resp.Status))
 	}
 }
 
 func (c *Client) Connect() {
-	<-c.Interrupt
-	fmt.Println("interrupt received")
-	close(c.Done)
+	if c.ConnectionToken == "" {
+		c.Done <- errors.New("client.Negotiate() was not called or was unnsuccessful")
+		close(c.Done)
+		return
+	}
+
+	config, err := c.getWebsocketConfig()
+	if err != err {
+		c.Done <- err
+		close(c.Done)
+		return
+	}
+
+	sock, err := websocket.DialConfig(config)
+	if err != nil {
+		c.Done <- fmt.Errorf("error establishing websocket connection: %w", err)
+		close(c.Done)
+		return
+	}
+	defer sock.Close()
+
+	fmt.Println("we here!")
+
+	sendSubscribe(sock)
+
+	listening := true
+	go func() {
+		for listening {
+			var msg string
+			err = websocket.Message.Receive(sock, &msg)
+			if err != nil && err.Error() == "EOF" {
+				return
+			} else if err != nil {
+				return
+			}
+			c.processMessage(msg)
+		}
+	}()
+	<-c.Interrupt // wait on interrupt
+	listening = false
+	c.Done <- err // write any errors to the done channel before closing
+	close(c.Done) // close client done channel so other's know we've closed the connection gracefully
 }
 
 func (c *Client) getWebsocketConfig() (*websocket.Config, error) {
 	var config *websocket.Config
-	b, err := url.Parse(c.BaseURL)
+	b, err := url.Parse(c.WSBaseURL)
 	if err != nil {
 		return config, fmt.Errorf("invalid BaseURL: %w", err)
 	}
 
 	u := url.URL{
-		Scheme: "wss",
+		Scheme: b.Scheme,
 		Host:   b.Host,
 		Path:   "/signalr/connect",
 		RawQuery: url.Values{
@@ -146,6 +193,67 @@ func (c *Client) getWebsocketConfig() (*websocket.Config, error) {
 	return config, nil
 }
 
+func sendSubscribe(sock *websocket.Conn) {
+	websocket.Message.Send(sock, `
+		{
+			"H": "Streaming",
+			"M": "Subscribe",
+			"A": [[
+				"Heartbeat",
+				"CarData.z",
+				"Position.z",
+				"ExtrapolatedClock",
+				"TopThree",
+				"RcmSeries",
+				"TimingStats",
+				"TimingAppData",
+				"WeatherData",
+				"TrackStatus",
+				"DriverList",
+				"RaceControlMessages",
+				"SessionInfo",
+				"SessionData",
+				"LapCount",
+				"TimingData"
+			]],
+			"I": 5
+		}
+	`)
+}
+
+type SignalrMessage struct {
+	Hub       string     `json:"H"`
+	Method    string     `json:"M"`
+	Arguments [][]string `json:"A"`
+	Interval  uint8      `json:"I"`
+}
+
+type F1Message struct {
+	Messages []struct {
+		Hub       string `json:"H"`
+		Message   string `json:"M"`
+		Arguments []any  `json:"A"`
+	} `json:"M"`
+}
+
+func (c *Client) processMessage(msg string) {
+	var messageData F1Message
+	err := json.Unmarshal([]byte(msg), &messageData)
+	if err != nil {
+		fmt.Println("ERROR UNMARSHALLING MSG:", msg)
+		return
+	}
+
+	for _, m := range messageData.Messages {
+		if m.Hub == "Streaming" && m.Message == "feed" && len(m.Arguments) == 3 {
+			switch m.Arguments[0] {
+			case "WeatherData":
+				c.WeatherChannel <- newWeatherDataEvent(m.Arguments)
+			}
+		}
+	}
+}
+
 type WeatherData struct {
 	AirTemp       string `json:"AirTemp"`
 	Humidity      string `json:"Humidity"`
@@ -164,11 +272,37 @@ type WeatherDataEvent struct {
 /* Private Helper Functions
 ------------------------------------------------------------------------------------------------- */
 
-func newWeatherDataEvent(d WeatherData) WeatherDataEvent {
-	return WeatherDataEvent{
+func newWeatherDataEvent(args []any) WeatherDataEvent {
+	wde := WeatherDataEvent{
 		Name: "WeatherData",
-		Data: d,
+		Data: WeatherData{},
 	}
+
+	if strMap, ok := args[1].(map[string]any); ok {
+		if str, ok := strMap["AirTemp"].(string); ok {
+			wde.Data.AirTemp = str
+		}
+		if str, ok := strMap["Humidity"].(string); ok {
+			wde.Data.Humidity = str
+		}
+		if str, ok := strMap["Pressure"].(string); ok {
+			wde.Data.Pressure = str
+		}
+		if str, ok := strMap["Rainfall"].(string); ok {
+			wde.Data.Rainfall = str
+		}
+		if str, ok := strMap["TrackTemp"].(string); ok {
+			wde.Data.TrackTemp = str
+		}
+		if str, ok := strMap["WindDirection"].(string); ok {
+			wde.Data.WindDirection = str
+		}
+		if str, ok := strMap["WindSpeed"].(string); ok {
+			wde.Data.WindSpeed = str
+		}
+	}
+
+	return wde
 }
 
 func parseNegotationConnectionToken(body io.ReadCloser) (string, error) {
