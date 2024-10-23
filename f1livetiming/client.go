@@ -11,6 +11,9 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+/* Core Client API
+------------------------------------------------------------------------------------------------- */
+
 type Client struct {
 	Interrupt          chan struct{}
 	Done               chan error
@@ -46,32 +49,6 @@ func NewClient(
 	return c
 }
 
-type ClientOption = func(c *Client)
-
-func WithHTTPBaseURL(baseUrl string) ClientOption {
-	return func(c *Client) {
-		c.HTTPBaseURL = baseUrl
-	}
-}
-
-func WithWSBaseURL(baseUrl string) ClientOption {
-	return func(c *Client) {
-		c.WSBaseURL = baseUrl
-	}
-}
-
-func WithWeatherChannel(weatherEvents chan WeatherDataEvent) ClientOption {
-	return func(c *Client) {
-		c.WeatherChannel = weatherEvents
-	}
-}
-
-func WithRaceControlChannel(raceCtrlEvents chan RaceControlEvent) ClientOption {
-	return func(c *Client) {
-		c.RaceControlChannel = raceCtrlEvents
-	}
-}
-
 type NegotiateResponse struct {
 	Url                     string  `json:"Url"`
 	ConnectionToken         string  `json:"ConnectionToken"`
@@ -85,6 +62,8 @@ type NegotiateResponse struct {
 	LongPollDelay           float64 `json:"LongPollDelay"`
 }
 
+// Negotiate calls the F1 Livetiming Signalr API, retreiving information required to start the
+// websocket connection using the Connect function.
 func (c *Client) Negotiate() error {
 	u, err := url.Parse(c.HTTPBaseURL)
 	if err != nil {
@@ -122,6 +101,8 @@ func (c *Client) Negotiate() error {
 	}
 }
 
+// Connect opens a websocket connection and automatically sends the "Subscribe" method to the
+// F1 Livetiming Signalr Server.
 func (c *Client) Connect() {
 	if c.ConnectionToken == "" {
 		c.Done <- errors.New("client.Negotiate() was not called or was unnsuccessful")
@@ -167,6 +148,58 @@ func (c *Client) Connect() {
 	c.Done <- err // write any errors to the done channel before closing
 	close(c.Done) // close client done channel so other's know we've closed the connection gracefully
 }
+
+/* Optional Function Parameters
+------------------------------------------------------------------------------------------------- */
+
+type ClientOption = func(c *Client)
+
+func WithHTTPBaseURL(baseUrl string) ClientOption {
+	return func(c *Client) {
+		c.HTTPBaseURL = baseUrl
+	}
+}
+
+func WithWSBaseURL(baseUrl string) ClientOption {
+	return func(c *Client) {
+		c.WSBaseURL = baseUrl
+	}
+}
+
+func WithWeatherChannel(weatherEvents chan WeatherDataEvent) ClientOption {
+	return func(c *Client) {
+		c.WeatherChannel = weatherEvents
+	}
+}
+
+func WithRaceControlChannel(raceCtrlEvents chan RaceControlEvent) ClientOption {
+	return func(c *Client) {
+		c.RaceControlChannel = raceCtrlEvents
+	}
+}
+
+/* F1 Livetiming API Raw Message Types
+------------------------------------------------------------------------------------------------- */
+
+type SignalrMessage struct {
+	Hub       string     `json:"H"`
+	Method    string     `json:"M"`
+	Arguments [][]string `json:"A"`
+	Interval  uint8      `json:"I"`
+}
+
+type F1Message struct {
+	Messages []F1NestedMessage `json:"M"`
+}
+
+type F1NestedMessage struct {
+	Hub       string `json:"H"`
+	Message   string `json:"M"`
+	Arguments []any  `json:"A"`
+}
+
+/* Private Helper Functions
+------------------------------------------------------------------------------------------------- */
 
 func (c *Client) getWebsocketConfig() (*websocket.Config, error) {
 	var config *websocket.Config
@@ -229,23 +262,6 @@ func sendSubscribe(sock *websocket.Conn) {
 	`)
 }
 
-type SignalrMessage struct {
-	Hub       string     `json:"H"`
-	Method    string     `json:"M"`
-	Arguments [][]string `json:"A"`
-	Interval  uint8      `json:"I"`
-}
-
-type F1Message struct {
-	Messages []F1NestedMessage `json:"M"`
-}
-
-type F1NestedMessage struct {
-	Hub       string `json:"H"`
-	Message   string `json:"M"`
-	Arguments []any  `json:"A"`
-}
-
 func (c *Client) processMessage(msg string) {
 	var messageData F1Message
 	err := json.Unmarshal([]byte(msg), &messageData)
@@ -264,124 +280,6 @@ func (c *Client) processMessage(msg string) {
 			}
 		}
 	}
-}
-
-type WeatherData struct {
-	AirTemp       string `json:"AirTemp"`
-	Humidity      string `json:"Humidity"`
-	Pressure      string `json:"Pressure"`
-	Rainfall      string `json:"Rainfall"`
-	TrackTemp     string `json:"TrackTemp"`
-	WindDirection string `json:"WindDirection"`
-	WindSpeed     string `json:"WindSpeed"`
-}
-
-type WeatherDataEvent struct {
-	Data WeatherData
-}
-
-func (c *Client) writeToWeatherChannel(m F1NestedMessage) {
-	if c.WeatherChannel != nil {
-		c.WeatherChannel <- newWeatherDataEvent(m.Arguments)
-	}
-}
-
-type RaceControlData struct {
-	Lap      uint8  `json:"Lap"`
-	Category string `json:"Category"`
-	Flag     string `json:"Flag"`
-	Scope    string `json:"Scope"`
-	Sector   uint8  `json:"Sector"`
-	Status   string `json:"Status"`
-	Message  string `json:"Message"`
-}
-
-type RaceControlEvent struct {
-	Data RaceControlData
-}
-
-func (c *Client) writeToRaceControlChannel(m F1NestedMessage) {
-	if c.RaceControlChannel == nil {
-		// The consumer did not ask for race control events; no need to process
-		return
-	}
-	messageMap, ok := m.Arguments[1].(map[string]interface{})
-	if !ok {
-		// The message is in an unknown format; stop processing
-		return
-	}
-
-	msgs, ok := messageMap["Messages"].(map[string]interface{})
-	if !ok {
-		// The message is in an unknown format; stop processing
-		return
-	}
-
-	for _, msg := range msgs {
-		rce := RaceControlEvent{
-			Data: RaceControlData{},
-		}
-		if strMap, ok := msg.(map[string]any); ok {
-			if v, ok := strMap["Lap"].(float64); ok {
-				rce.Data.Lap = uint8(v)
-			}
-			if v, ok := strMap["Category"].(string); ok {
-				rce.Data.Category = v
-			}
-			if v, ok := strMap["Flag"].(string); ok {
-				rce.Data.Flag = v
-			}
-			if v, ok := strMap["Scope"].(string); ok {
-				rce.Data.Scope = v
-			}
-			if v, ok := strMap["Sector"].(float64); ok {
-				rce.Data.Sector = uint8(v)
-			}
-			if v, ok := strMap["Status"].(string); ok {
-				rce.Data.Status = v
-			}
-			if v, ok := strMap["Message"].(string); ok {
-				rce.Data.Message = v
-			}
-		}
-
-		c.RaceControlChannel <- rce
-	}
-}
-
-/* Private Helper Functions
-------------------------------------------------------------------------------------------------- */
-
-func newWeatherDataEvent(args []any) WeatherDataEvent {
-	wde := WeatherDataEvent{
-		Data: WeatherData{},
-	}
-
-	if strMap, ok := args[1].(map[string]any); ok {
-		if v, ok := strMap["AirTemp"].(string); ok {
-			wde.Data.AirTemp = v
-		}
-		if v, ok := strMap["Humidity"].(string); ok {
-			wde.Data.Humidity = v
-		}
-		if v, ok := strMap["Pressure"].(string); ok {
-			wde.Data.Pressure = v
-		}
-		if v, ok := strMap["Rainfall"].(string); ok {
-			wde.Data.Rainfall = v
-		}
-		if v, ok := strMap["TrackTemp"].(string); ok {
-			wde.Data.TrackTemp = v
-		}
-		if v, ok := strMap["WindDirection"].(string); ok {
-			wde.Data.WindDirection = v
-		}
-		if v, ok := strMap["WindSpeed"].(string); ok {
-			wde.Data.WindSpeed = v
-		}
-	}
-
-	return wde
 }
 
 func parseNegotationConnectionToken(body io.ReadCloser) (string, error) {
