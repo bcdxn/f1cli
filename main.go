@@ -12,7 +12,7 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 	i := make(chan struct{})
-	d := make(chan struct{})
+	d := make(chan error)
 	weatherEvents := make(chan f1livetiming.WeatherDataEvent)
 
 	c := f1livetiming.NewClient(i, d, f1livetiming.WithWeatherChannel(weatherEvents))
