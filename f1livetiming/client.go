@@ -12,13 +12,14 @@ import (
 )
 
 type Client struct {
-	Interrupt       chan struct{}
-	Done            chan error
-	WeatherChannel  chan WeatherDataEvent
-	ConnectionToken string
-	Cookie          string
-	HTTPBaseURL     string
-	WSBaseURL       string
+	Interrupt          chan struct{}
+	Done               chan error
+	WeatherChannel     chan WeatherDataEvent
+	RaceControlChannel chan RaceControlEvent
+	ConnectionToken    string
+	Cookie             string
+	HTTPBaseURL        string
+	WSBaseURL          string
 }
 
 // NewClient creates and returns a new F1 LiveTiming Client for retrieving real-time data from
@@ -62,6 +63,12 @@ func WithWSBaseURL(baseUrl string) ClientOption {
 func WithWeatherChannel(weatherEvents chan WeatherDataEvent) ClientOption {
 	return func(c *Client) {
 		c.WeatherChannel = weatherEvents
+	}
+}
+
+func WithRaceControlChannel(raceCtrlEvents chan RaceControlEvent) ClientOption {
+	return func(c *Client) {
+		c.RaceControlChannel = raceCtrlEvents
 	}
 }
 
@@ -230,11 +237,13 @@ type SignalrMessage struct {
 }
 
 type F1Message struct {
-	Messages []struct {
-		Hub       string `json:"H"`
-		Message   string `json:"M"`
-		Arguments []any  `json:"A"`
-	} `json:"M"`
+	Messages []F1NestedMessage `json:"M"`
+}
+
+type F1NestedMessage struct {
+	Hub       string `json:"H"`
+	Message   string `json:"M"`
+	Arguments []any  `json:"A"`
 }
 
 func (c *Client) processMessage(msg string) {
@@ -249,7 +258,9 @@ func (c *Client) processMessage(msg string) {
 		if m.Hub == "Streaming" && m.Message == "feed" && len(m.Arguments) == 3 {
 			switch m.Arguments[0] {
 			case "WeatherData":
-				c.WeatherChannel <- newWeatherDataEvent(m.Arguments)
+				c.writeToWeatherChannel(m)
+			case "RaceControlMessages":
+				c.writeToRaceControlChannel(m)
 			}
 		}
 	}
@@ -266,8 +277,76 @@ type WeatherData struct {
 }
 
 type WeatherDataEvent struct {
-	Name string
 	Data WeatherData
+}
+
+func (c *Client) writeToWeatherChannel(m F1NestedMessage) {
+	if c.WeatherChannel != nil {
+		c.WeatherChannel <- newWeatherDataEvent(m.Arguments)
+	}
+}
+
+type RaceControlData struct {
+	Lap      uint8  `json:"Lap"`
+	Category string `json:"Category"`
+	Flag     string `json:"Flag"`
+	Scope    string `json:"Scope"`
+	Sector   uint8  `json:"Sector"`
+	Status   string `json:"Status"`
+	Message  string `json:"Message"`
+}
+
+type RaceControlEvent struct {
+	Data RaceControlData
+}
+
+func (c *Client) writeToRaceControlChannel(m F1NestedMessage) {
+	if c.RaceControlChannel == nil {
+		// The consumer did not ask for race control events; no need to process
+		return
+	}
+	messageMap, ok := m.Arguments[1].(map[string]interface{})
+	if !ok {
+		// The message is in an unknown format; stop processing
+		return
+	}
+
+	msgs, ok := messageMap["Messages"].(map[string]interface{})
+	if !ok {
+		// The message is in an unknown format; stop processing
+		return
+	}
+
+	for _, msg := range msgs {
+		rce := RaceControlEvent{
+			Data: RaceControlData{},
+		}
+		if strMap, ok := msg.(map[string]any); ok {
+			if v, ok := strMap["Lap"].(float64); ok {
+				rce.Data.Lap = uint8(v)
+			}
+			if v, ok := strMap["Category"].(string); ok {
+				rce.Data.Category = v
+			}
+			if v, ok := strMap["Flag"].(string); ok {
+				rce.Data.Flag = v
+			}
+			if v, ok := strMap["Scope"].(string); ok {
+				rce.Data.Scope = v
+			}
+			if v, ok := strMap["Sector"].(float64); ok {
+				rce.Data.Sector = uint8(v)
+			}
+			if v, ok := strMap["Status"].(string); ok {
+				rce.Data.Status = v
+			}
+			if v, ok := strMap["Message"].(string); ok {
+				rce.Data.Message = v
+			}
+		}
+
+		c.RaceControlChannel <- rce
+	}
 }
 
 /* Private Helper Functions
@@ -275,31 +354,30 @@ type WeatherDataEvent struct {
 
 func newWeatherDataEvent(args []any) WeatherDataEvent {
 	wde := WeatherDataEvent{
-		Name: "WeatherData",
 		Data: WeatherData{},
 	}
 
 	if strMap, ok := args[1].(map[string]any); ok {
-		if str, ok := strMap["AirTemp"].(string); ok {
-			wde.Data.AirTemp = str
+		if v, ok := strMap["AirTemp"].(string); ok {
+			wde.Data.AirTemp = v
 		}
-		if str, ok := strMap["Humidity"].(string); ok {
-			wde.Data.Humidity = str
+		if v, ok := strMap["Humidity"].(string); ok {
+			wde.Data.Humidity = v
 		}
-		if str, ok := strMap["Pressure"].(string); ok {
-			wde.Data.Pressure = str
+		if v, ok := strMap["Pressure"].(string); ok {
+			wde.Data.Pressure = v
 		}
-		if str, ok := strMap["Rainfall"].(string); ok {
-			wde.Data.Rainfall = str
+		if v, ok := strMap["Rainfall"].(string); ok {
+			wde.Data.Rainfall = v
 		}
-		if str, ok := strMap["TrackTemp"].(string); ok {
-			wde.Data.TrackTemp = str
+		if v, ok := strMap["TrackTemp"].(string); ok {
+			wde.Data.TrackTemp = v
 		}
-		if str, ok := strMap["WindDirection"].(string); ok {
-			wde.Data.WindDirection = str
+		if v, ok := strMap["WindDirection"].(string); ok {
+			wde.Data.WindDirection = v
 		}
-		if str, ok := strMap["WindSpeed"].(string); ok {
-			wde.Data.WindSpeed = str
+		if v, ok := strMap["WindSpeed"].(string); ok {
+			wde.Data.WindSpeed = v
 		}
 	}
 

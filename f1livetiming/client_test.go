@@ -98,15 +98,16 @@ func TestConnectSubscribe(t *testing.T) {
 }
 
 // TestF1LivingTimingMessages ensures that messages
-func TestF1LivingTimingMessages(t *testing.T) {
+func TestWeatherDataMessages(t *testing.T) {
 	i := make(chan struct{})
 	d := make(chan error)
 	weatherCh := make(chan WeatherDataEvent)
-	weatherMsg, err := os.ReadFile("./testdata/message.json")
+	weatherMsg, err := os.ReadFile("./testdata/messages-with-weather.json")
 	if err != nil {
 		t.Error("unable to read static data required for test setup", err)
+		return
 	}
-
+	// start test server
 	ts, _ := newWSTestServer(t, func() websocket.Handler {
 		return func(conn *websocket.Conn) {
 			defer conn.Close()
@@ -117,7 +118,7 @@ func TestF1LivingTimingMessages(t *testing.T) {
 		}
 	}())
 	defer ts.Close()
-
+	// create and connect client to server
 	c := NewClient(
 		i,
 		d,
@@ -125,10 +126,8 @@ func TestF1LivingTimingMessages(t *testing.T) {
 		WithWSBaseURL(httpToWs(t, ts.URL)),
 		WithWeatherChannel(weatherCh),
 	)
-
 	c.Negotiate()
 	go c.Connect()
-
 	// process and test weather event
 	for wait := true; wait; {
 		select {
@@ -137,14 +136,75 @@ func TestF1LivingTimingMessages(t *testing.T) {
 			if err != nil {
 				t.Errorf("should not have errored but found '%s'", err.Error())
 			}
-		case we := <-weatherCh:
-			if we.Name != "WeatherData" {
-				t.Errorf("invalid weather event - expected name '%s' but found '%s'", "WeatherData", we.Name)
-			}
-			if we.Data.AirTemp != "28.5" {
-				t.Errorf("incorrect AirTemp - expected '%s' but found '%s", "28.5", we.Data.AirTemp)
+		case e := <-weatherCh:
+			if e.Data.AirTemp != "28.5" {
+				t.Errorf("incorrect AirTemp - expected '%s' but found '%s", "28.5", e.Data.AirTemp)
 			}
 			close(i)
+		}
+	}
+}
+
+func TestF1RaceControlMessages(t *testing.T) {
+	i := make(chan struct{})
+	d := make(chan error)
+	racectrlCh := make(chan RaceControlEvent)
+	racectrlMsg, err := os.ReadFile("./testdata/messages-with-racectrl.json")
+	if err != nil {
+		t.Error("unable to read static data required for test setup", err)
+		return
+	}
+	// start test server
+	ts, _ := newWSTestServer(t, func() websocket.Handler {
+		return func(conn *websocket.Conn) {
+			defer conn.Close()
+			var msg string
+			websocket.Message.Receive(conn, &msg)
+			// Send message
+			websocket.Message.Send(conn, racectrlMsg)
+		}
+	}())
+	defer ts.Close()
+	// create and connect client to server
+	c := NewClient(
+		i,
+		d,
+		WithHTTPBaseURL(ts.URL),
+		WithWSBaseURL(httpToWs(t, ts.URL)),
+		WithRaceControlChannel(racectrlCh),
+	)
+	c.Negotiate()
+	go c.Connect()
+	// process and test race control event
+	msgCount := 0
+	for wait := true; wait; {
+		select {
+		case err := <-d:
+			wait = false
+			if err != nil {
+				t.Errorf("should not have errored but found '%s'", err.Error())
+			}
+		case e := <-racectrlCh:
+			msgCount++
+			// check all 4 messages
+			switch msgCount {
+			case 1:
+				if e.Data.Lap != 19 {
+					t.Errorf("invalid race ctrl event - expected '%d' but found '%d'", 19, e.Data.Lap)
+				}
+				if e.Data.Category != "Flag" {
+					t.Errorf("invalid race ctrl event - expected '%s' but found '%s'", "Flag", e.Data.Category)
+				}
+			case 2:
+				if e.Data.Category != "Drs" {
+					t.Errorf("invalid race ctrl event - expected '%s' but found '%s'", "Drs", e.Data.Category)
+				}
+				if e.Data.Status != "DISABLED" {
+					t.Errorf("invalid race ctrl event - expected '%s' but found '%s'", "DISABLED", e.Data.Status)
+				}
+			case 4:
+				close(i)
+			}
 		}
 	}
 }
