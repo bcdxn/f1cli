@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"testing"
 
@@ -96,49 +97,57 @@ func TestConnectSubscribe(t *testing.T) {
 	}
 }
 
-// func TestF1LivingTimingMessages(t *testing.T) {
-// 	i := make(chan struct{})
-// 	d := make(chan struct{})
-// 	eCh := make(chan error)
-// 	weatherCh := make(chan WeatherDataEvent)
-// 	weatherMsg, err := os.ReadFile("./testdata/message.json")
-// 	if err != nil {
-// 		t.Error("unable to read static data required for test setup", err)
-// 	}
+// TestF1LivingTimingMessages ensures that messages
+func TestF1LivingTimingMessages(t *testing.T) {
+	i := make(chan struct{})
+	d := make(chan error)
+	weatherCh := make(chan WeatherDataEvent)
+	weatherMsg, err := os.ReadFile("./testdata/message.json")
+	if err != nil {
+		t.Error("unable to read static data required for test setup", err)
+	}
 
-// 	ts, _ := newWSTestServer(t, string(weatherMsg))
-// 	defer ts.Close()
+	ts, _ := newWSTestServer(t, func() websocket.Handler {
+		return func(conn *websocket.Conn) {
+			defer conn.Close()
+			var msg string
+			websocket.Message.Receive(conn, &msg)
+			// Send message
+			websocket.Message.Send(conn, weatherMsg)
+		}
+	}())
+	defer ts.Close()
 
-// 	c := NewClient(
-// 		i,
-// 		d,
-// 		eCh,
-// 		WithHTTPBaseURL(ts.URL),
-// 		WithWSBaseURL(httpToWs(t, ts.URL)),
-// 		WithWeatherChannel(weatherCh),
-// 	)
+	c := NewClient(
+		i,
+		d,
+		WithHTTPBaseURL(ts.URL),
+		WithWSBaseURL(httpToWs(t, ts.URL)),
+		WithWeatherChannel(weatherCh),
+	)
 
-// 	c.Negotiate()
-// 	go c.Connect()
+	c.Negotiate()
+	go c.Connect()
 
-// 	// process and test weather event
-// 	for wait := true; wait; {
-// 		select {
-// 		case <-d:
-// 			wait = false
-// 		case we := <-weatherCh:
-// 			if we.Name != "WeatherData" {
-// 				t.Errorf("invalid weather event - expected name '%s' but found '%s'", "WeatherData", we.Name)
-// 			}
-// 			if we.Data.AirTemp != "28.5" {
-// 				t.Errorf("incorrect AirTemp - expected '%s' but found '%s", "28.5", we.Data.AirTemp)
-// 			}
-// 			close(i)
-// 		case err := <-eCh:
-// 			t.Error("should not have received error", err)
-// 		}
-// 	}
-// }
+	// process and test weather event
+	for wait := true; wait; {
+		select {
+		case err := <-d:
+			wait = false
+			if err != nil {
+				t.Errorf("should not have errored but found '%s'", err.Error())
+			}
+		case we := <-weatherCh:
+			if we.Name != "WeatherData" {
+				t.Errorf("invalid weather event - expected name '%s' but found '%s'", "WeatherData", we.Name)
+			}
+			if we.Data.AirTemp != "28.5" {
+				t.Errorf("incorrect AirTemp - expected '%s' but found '%s", "28.5", we.Data.AirTemp)
+			}
+			close(i)
+		}
+	}
+}
 
 func newHttpTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -166,7 +175,7 @@ func newHttpTestServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-func newWSTestServer(t *testing.T, h websocket.Handler, msgsToSend ...string) (*httptest.Server, *websocket.Server) {
+func newWSTestServer(t *testing.T, h websocket.Handler) (*httptest.Server, *websocket.Server) {
 	t.Helper()
 
 	mux := http.NewServeMux()
@@ -193,15 +202,6 @@ func newWSTestServer(t *testing.T, h websocket.Handler, msgsToSend ...string) (*
 	mux.HandleFunc("/signalr/connect", func(w http.ResponseWriter, r *http.Request) {
 		ws = websocket.Server{
 			Handler: h,
-			// func(conn *websocket.Conn) {
-			// 	defer conn.Close()
-			// 	var msg string
-			// 	websocket.Message.Receive(conn, &msg)
-			// 	// Send message
-			// 	for _, msgToSend := range msgsToSend {
-			// 		websocket.Message.Send(conn, msgToSend)
-			// 	}
-			// },
 		}
 		ws.ServeHTTP(w, r)
 	})

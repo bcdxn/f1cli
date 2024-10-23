@@ -137,8 +137,6 @@ func (c *Client) Connect() {
 	}
 	defer sock.Close()
 
-	fmt.Println("we here!")
-
 	sendSubscribe(sock)
 
 	listening := true
@@ -147,13 +145,16 @@ func (c *Client) Connect() {
 			var msg string
 			err = websocket.Message.Receive(sock, &msg)
 			if err != nil && err.Error() == "EOF" {
+				err = nil // we can ignore this error; it just means the server closed
 				return
 			} else if err != nil {
+				fmt.Println("err", err.Error())
 				return
 			}
 			c.processMessage(msg)
 		}
 	}()
+
 	<-c.Interrupt // wait on interrupt
 	listening = false
 	c.Done <- err // write any errors to the done channel before closing
