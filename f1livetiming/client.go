@@ -17,6 +17,7 @@ import (
 type Client struct {
 	Interrupt          chan struct{}
 	Done               chan error
+	SessionInfoChannel chan SessionInfoEvent
 	WeatherChannel     chan WeatherDataEvent
 	RaceControlChannel chan RaceControlEvent
 	ConnectionToken    string
@@ -139,7 +140,20 @@ func (c *Client) Connect() {
 				fmt.Println("err", err.Error())
 				return
 			}
-			c.processMessage(msg)
+			// Always try to parse a change message first since there is only 1 reference message and
+			// tens of thousands of change messages over the course of a session
+			var changeData F1ChangeMessage
+			err := json.Unmarshal([]byte(msg), &changeData)
+			if err == nil && len(changeData.ChangeSetId) > 0 {
+				c.processChangeMessage(changeData)
+				return
+			}
+			// Next try to parse a reference data message
+			var referenceData F1ReferenceMessage
+			err = json.Unmarshal([]byte(msg), &referenceData)
+			if err == nil {
+				c.processReferenceMessage(referenceData)
+			}
 		}
 	}()
 
@@ -166,6 +180,12 @@ func WithWSBaseURL(baseUrl string) ClientOption {
 	}
 }
 
+func WithSessionInfoChannel(sessionInfoEvents chan SessionInfoEvent) ClientOption {
+	return func(c *Client) {
+		c.SessionInfoChannel = sessionInfoEvents
+	}
+}
+
 func WithWeatherChannel(weatherEvents chan WeatherDataEvent) ClientOption {
 	return func(c *Client) {
 		c.WeatherChannel = weatherEvents
@@ -188,8 +208,9 @@ type SignalrMessage struct {
 	Interval  uint8      `json:"I"`
 }
 
-type F1Message struct {
-	Messages []F1NestedMessage `json:"M"`
+type F1ChangeMessage struct {
+	ChangeSetId string            `json:"C"`
+	Messages    []F1NestedMessage `json:"M"`
 }
 
 type F1NestedMessage struct {
@@ -262,21 +283,19 @@ func sendSubscribe(sock *websocket.Conn) {
 	`)
 }
 
-func (c *Client) processMessage(msg string) {
-	var messageData F1Message
-	err := json.Unmarshal([]byte(msg), &messageData)
-	if err != nil {
-		fmt.Println("ERROR UNMARSHALLING MSG:", msg)
-		return
-	}
+func (c *Client) processReferenceMessage(referenceMessage F1ReferenceMessage) {
+	c.writeToSessionInfoChannel(referenceMessage.Reference.SessionInfo)
+	// c.writeToWeatherChannel(referenceMessage.Reference.WeatherData)
+}
 
-	for _, m := range messageData.Messages {
+func (c *Client) processChangeMessage(changeMessage F1ChangeMessage) {
+	for _, m := range changeMessage.Messages {
 		if m.Hub == "Streaming" && m.Message == "feed" && len(m.Arguments) == 3 {
 			switch m.Arguments[0] {
 			case "WeatherData":
-				c.writeToWeatherChannel(m)
+				c.writeToWeatherChannel(m.Arguments[1])
 			case "RaceControlMessages":
-				c.writeToRaceControlChannel(m)
+				c.writeToRaceControlChannel(m.Arguments[1])
 			}
 		}
 	}

@@ -97,6 +97,55 @@ func TestConnectSubscribe(t *testing.T) {
 	}
 }
 
+func TestReferenceMessage(t *testing.T) {
+	i := make(chan struct{})
+	d := make(chan error)
+	sessionInfoCh := make(chan SessionInfoEvent)
+	referenceDataMsg, err := os.ReadFile("./testdata/messages-with-full-reference.json")
+	if err != nil {
+		t.Error("unable to read static data required for test setup", err)
+	}
+	// start test server
+	ts, _ := newWSTestServer(t, func() websocket.Handler {
+		return func(conn *websocket.Conn) {
+			defer conn.Close()
+			var msg string
+			websocket.Message.Receive(conn, &msg)
+			// Send message
+			websocket.Message.Send(conn, referenceDataMsg)
+		}
+	}())
+	defer ts.Close()
+	// create and connect client to server
+	c := NewClient(
+		i,
+		d,
+		WithHTTPBaseURL(ts.URL),
+		WithWSBaseURL(httpToWs(t, ts.URL)),
+		WithSessionInfoChannel(sessionInfoCh),
+	)
+	c.Negotiate()
+	go c.Connect()
+	// process and test session info event
+	for wait := true; wait; {
+		select {
+		case err := <-d:
+			wait = false
+			if err != nil {
+				t.Errorf("should not have errored but found '%s'", err.Error())
+			}
+		case e := <-sessionInfoCh:
+			if e.Data.Meeting.Name != "United States Grand Prix" {
+				t.Errorf("incorrect Name - expected '%s' but found '%s", "United States Grand Prix", e.Data.Meeting.Name)
+			}
+			if e.Data.Type != "Race" {
+				t.Errorf("incorrect session type - expected '%s' but found '%s", "Race", e.Data.Type)
+			}
+			close(i)
+		}
+	}
+}
+
 // TestF1LivingTimingMessages ensures that messages
 func TestWeatherDataMessages(t *testing.T) {
 	i := make(chan struct{})
@@ -278,8 +327,3 @@ func httpToWs(t *testing.T, u string) string {
 	wsUrl := httpsRe.ReplaceAllString(u, "wss://")
 	return httpRe.ReplaceAllString(wsUrl, "ws://")
 }
-
-// func sendMessage(t *testing.T, ws *websocket.Conn, msg string) {
-// 	t.Helper()
-// 	ws.Write([]byte(msg))
-// }
