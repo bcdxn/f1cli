@@ -56,12 +56,12 @@ There are two core types of messages:
 
 ## Data Available for Subscription
 
-- [CarData](#car-data)
+- [CarData](#car-dataz)
 - [DriverList](#driver-list)
 - [ExtrapolatedClock](extrapolated-clock)
 - [Heartbeat](#hearbeat)
 - [LapCount](#lap-count)
-- [Position.z](#position-z)
+- [Position.z](#positionz)
 - [RaceControlMessages](#race-control-messages)
 - [SessionData](#session-data)
 - [SessionInfo](#session-info)
@@ -72,7 +72,7 @@ There are two core types of messages:
 - [TrackStatus](#track-status)
 - [WeatherData](#weather-data)
 
-### [`CarData.z`](#cardata)
+### [`CarData.z`](#cardataz)
 
 [Deflate-compressed](https://en.wikipedia.org/wiki/DEFLATE) statistics about individual cars including:
 
@@ -237,7 +237,7 @@ Message sent when lap count increases; follows the lap of the lead car.
 ]
 ```
 
-### [`Position.z`](#position-z)
+### [`Position.z`](#positionz)
 
 Deflate-compressed statistics about car positions on track:
 
