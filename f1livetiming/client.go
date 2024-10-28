@@ -15,6 +15,7 @@ import (
 ------------------------------------------------------------------------------------------------- */
 
 type Client struct {
+	logger             Logger
 	Interrupt          chan struct{}
 	Done               chan error
 	SessionInfoChannel chan SessionInfoEvent
@@ -37,15 +38,18 @@ func NewClient(
 	opts ...ClientOption,
 ) *Client {
 	c := &Client{
+		logger:      logger{},
 		Interrupt:   interruptChannel,
 		Done:        doneChannel,
 		HTTPBaseURL: "https://livetiming.formula1.com",
-		WSBaseURL:   "https://livetiming.formula1.com",
+		WSBaseURL:   "wss://livetiming.formula1.com",
 	}
 
 	for _, opt := range opts {
 		opt(c)
 	}
+
+	c.logger.Debug("creating new F1 LiveTiming Client")
 
 	return c
 }
@@ -66,6 +70,7 @@ type NegotiateResponse struct {
 // Negotiate calls the F1 Livetiming Signalr API, retreiving information required to start the
 // websocket connection using the Connect function.
 func (c *Client) Negotiate() error {
+	c.logger.Debug("negotiating connection")
 	u, err := url.Parse(c.HTTPBaseURL)
 	if err != nil {
 		return fmt.Errorf("invalid HTTPBaseURL: %w", err)
@@ -96,6 +101,7 @@ func (c *Client) Negotiate() error {
 		}
 		c.ConnectionToken = ct
 		c.Cookie = resp.Header.Get("set-cookie")
+		c.logger.Debug("successfully negotiated connection; connection token len:", len(ct))
 		return nil
 	default:
 		return fmt.Errorf("error negotiating f1 livetiming api connection: %w", errors.New(resp.Status))
@@ -105,6 +111,7 @@ func (c *Client) Negotiate() error {
 // Connect opens a websocket connection and automatically sends the "Subscribe" method to the
 // F1 Livetiming Signalr Server.
 func (c *Client) Connect() {
+	c.logger.Debug("connecting to signalr server for realtime updates")
 	if c.ConnectionToken == "" {
 		c.Done <- errors.New("client.Negotiate() was not called or was unnsuccessful")
 		close(c.Done)
@@ -113,53 +120,73 @@ func (c *Client) Connect() {
 
 	config, err := c.getWebsocketConfig()
 	if err != err {
+		c.logger.Error("error establishing websocket connection:", err)
 		c.Done <- err
 		close(c.Done)
 		return
 	}
+	c.logger.Debug("successfully configured signalr websocket")
 
 	sock, err := websocket.DialConfig(config)
 	if err != nil {
+		c.logger.Error("error establishing websocket connection:", err)
 		c.Done <- fmt.Errorf("error establishing websocket connection: %w", err)
 		close(c.Done)
 		return
 	}
 	defer sock.Close()
+	c.logger.Debug("successfully connected to signalr websocket")
 
-	sendSubscribe(sock)
+	err = sendSubscribe(sock)
+	if err != nil {
+		c.logger.Error("error establishing websocket connection:", err)
+		c.Done <- fmt.Errorf("error establishing websocket connection: %w", err)
+		close(c.Done)
+		return
+	}
 
 	listening := true
 	go func() {
+		c.logger.Debug("listening on signalr websocket")
 		for listening {
 			var msg string
 			err = websocket.Message.Receive(sock, &msg)
 			if err != nil && err.Error() == "EOF" {
 				err = nil // we can ignore this error; it just means the server closed
+				c.logger.Debug("received EOF message livetiming API")
 				return
 			} else if err != nil {
-				fmt.Println("err", err.Error())
+				c.logger.Error("received error from livetiming API", err)
 				return
 			}
+			c.logger.Debug("received f1 livetiming API message", msg)
 			// Always try to parse a change message first since there is only 1 reference message and
 			// tens of thousands of change messages over the course of a session
 			var changeData F1ChangeMessage
 			err := json.Unmarshal([]byte(msg), &changeData)
-			if err == nil && len(changeData.ChangeSetId) > 0 {
+			if err == nil && len(changeData.ChangeSetId) > 0 && len(changeData.Messages) > 0 {
+				c.logger.Debug("received change data message")
 				c.processChangeMessage(changeData)
 				return
 			}
 			// Next try to parse a reference data message
 			var referenceData F1ReferenceMessage
 			err = json.Unmarshal([]byte(msg), &referenceData)
-			if err == nil {
+			if err == nil && referenceData.MessageInterval != "" {
+				c.logger.Debug("received reference data message")
 				c.processReferenceMessage(referenceData)
 			}
+			c.logger.Debug("done processing message")
 		}
 	}()
 
+	c.logger.Debug("f1 client waiting for interrupt")
 	<-c.Interrupt // wait on interrupt
+	c.logger.Debug("f1 client received interrupt")
 	listening = false
+	c.logger.Debug("writing any error to done channel")
 	c.Done <- err // write any errors to the done channel before closing
+	c.logger.Debug("closing done channel")
 	close(c.Done) // close client done channel so other's know we've closed the connection gracefully
 }
 
@@ -195,6 +222,12 @@ func WithWeatherChannel(weatherEvents chan WeatherDataEvent) ClientOption {
 func WithRaceControlChannel(raceCtrlEvents chan RaceControlEvent) ClientOption {
 	return func(c *Client) {
 		c.RaceControlChannel = raceCtrlEvents
+	}
+}
+
+func WithLogger(l Logger) ClientOption {
+	return func(c *Client) {
+		c.logger = l
 	}
 }
 
@@ -255,8 +288,8 @@ func (c *Client) getWebsocketConfig() (*websocket.Config, error) {
 	return config, nil
 }
 
-func sendSubscribe(sock *websocket.Conn) {
-	websocket.Message.Send(sock, `
+func sendSubscribe(sock *websocket.Conn) error {
+	return websocket.Message.Send(sock, `
 		{
 			"H": "Streaming",
 			"M": "Subscribe",
@@ -316,4 +349,24 @@ func parseNegotationConnectionToken(body io.ReadCloser) (string, error) {
 	}
 
 	return n.ConnectionToken, nil
+}
+
+/* Inner logging implementation
+------------------------------------------------------------------------------------------------- */
+
+type Logger interface {
+	Debug(msg string, things ...any)
+	Error(msg string, things ...any)
+}
+
+type logger struct{}
+
+func (l logger) Debug(msg string, things ...any) {
+	line := append([]any{msg}, things)
+	fmt.Println(line...)
+}
+
+func (l logger) Error(msg string, things ...any) {
+	line := append([]any{"ERROR:", msg}, things)
+	fmt.Println(line...)
 }
