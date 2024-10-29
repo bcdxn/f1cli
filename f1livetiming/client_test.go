@@ -11,10 +11,15 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+type testLogger struct{}
+
+func (l testLogger) Debug(string, ...any) {}
+func (l testLogger) Error(string, ...any) {}
+
 func TestNewClient(t *testing.T) {
 	i := make(chan struct{})
 	d := make(chan error)
-	c := NewClient(i, d)
+	c := NewClient(i, d, WithLogger(testLogger{}))
 
 	expected := "https://livetiming.formula1.com"
 	if c.HTTPBaseURL != expected {
@@ -26,7 +31,7 @@ func TestNewClient(t *testing.T) {
 
 	h := "http://test.com"
 	w := httpToWs(t, "http://test.com")
-	c = NewClient(i, d, WithHTTPBaseURL(h), WithWSBaseURL(w))
+	c = NewClient(i, d, WithHTTPBaseURL(h), WithWSBaseURL(w), WithLogger(testLogger{}))
 	if c.HTTPBaseURL != h {
 		t.Errorf("Client.HTTPBaseURL was not set to the correct value, expected '%s', found '%s'", h, c.HTTPBaseURL)
 	}
@@ -41,7 +46,7 @@ func TestNegotiate(t *testing.T) {
 
 	i := make(chan struct{})
 	d := make(chan error)
-	c := NewClient(i, d, WithHTTPBaseURL(ts.URL))
+	c := NewClient(i, d, WithHTTPBaseURL(ts.URL), WithLogger(testLogger{}))
 
 	c.Negotiate()
 
@@ -55,7 +60,7 @@ func TestNegotiate(t *testing.T) {
 func TestConnectWithoutNegotiate(t *testing.T) {
 	i := make(chan struct{})
 	d := make(chan error)
-	c := NewClient(i, d)
+	c := NewClient(i, d, WithLogger(testLogger{}))
 
 	go c.Connect()
 
@@ -86,7 +91,7 @@ func TestConnectSubscribe(t *testing.T) {
 	}())
 	defer ts.Close()
 
-	c := NewClient(i, d, WithHTTPBaseURL(ts.URL), WithWSBaseURL(httpToWs(t, ts.URL)))
+	c := NewClient(i, d, WithHTTPBaseURL(ts.URL), WithWSBaseURL(httpToWs(t, ts.URL)), WithLogger(testLogger{}))
 
 	c.Negotiate()
 	go c.Connect()
@@ -123,6 +128,7 @@ func TestReferenceMessage(t *testing.T) {
 		WithHTTPBaseURL(ts.URL),
 		WithWSBaseURL(httpToWs(t, ts.URL)),
 		WithSessionInfoChannel(sessionInfoCh),
+		WithLogger(testLogger{}),
 	)
 	c.Negotiate()
 	go c.Connect()
@@ -174,6 +180,7 @@ func TestWeatherDataMessages(t *testing.T) {
 		WithHTTPBaseURL(ts.URL),
 		WithWSBaseURL(httpToWs(t, ts.URL)),
 		WithWeatherChannel(weatherCh),
+		WithLogger(testLogger{}),
 	)
 	c.Negotiate()
 	go c.Connect()
@@ -194,7 +201,7 @@ func TestWeatherDataMessages(t *testing.T) {
 	}
 }
 
-func TestF1RaceControlMessages(t *testing.T) {
+func TestRaceControlMessages(t *testing.T) {
 	i := make(chan struct{})
 	d := make(chan error)
 	racectrlCh := make(chan RaceControlEvent)
@@ -221,6 +228,7 @@ func TestF1RaceControlMessages(t *testing.T) {
 		WithHTTPBaseURL(ts.URL),
 		WithWSBaseURL(httpToWs(t, ts.URL)),
 		WithRaceControlChannel(racectrlCh),
+		WithLogger(testLogger{}),
 	)
 	c.Negotiate()
 	go c.Connect()
@@ -252,6 +260,121 @@ func TestF1RaceControlMessages(t *testing.T) {
 					t.Errorf("invalid race ctrl event - expected '%s' but found '%s'", "DISABLED", e.Data.Status)
 				}
 			case 4:
+				close(i)
+			}
+		}
+	}
+}
+
+func TestSessionInfoMessages(t *testing.T) {
+	i := make(chan struct{})
+	d := make(chan error)
+	sessionInfoCh := make(chan SessionInfoEvent)
+	sessionInfoMsg, err := os.ReadFile("./testdata/messages-with-sessioninfo.json")
+	if err != nil {
+		t.Error("unable to read static data required for test setup", err)
+		return
+	}
+	// start test server
+	ts, _ := newWSTestServer(t, func() websocket.Handler {
+		return func(conn *websocket.Conn) {
+			defer conn.Close()
+			var msg string
+			websocket.Message.Receive(conn, &msg)
+			// Send message
+			websocket.Message.Send(conn, sessionInfoMsg)
+		}
+	}())
+	defer ts.Close()
+	// create and connect client to server
+	c := NewClient(
+		i,
+		d,
+		WithHTTPBaseURL(ts.URL),
+		WithWSBaseURL(httpToWs(t, ts.URL)),
+		WithSessionInfoChannel(sessionInfoCh),
+		WithLogger(testLogger{}),
+	)
+	c.Negotiate()
+	go c.Connect()
+	// process and test session info event
+	for wait := true; wait; {
+		select {
+		case err := <-d:
+			wait = false
+			if err != nil {
+				t.Errorf("should not have errored but found '%s'", err.Error())
+			}
+		case e := <-sessionInfoCh:
+			if e.Data.Meeting.Name != "United States Grand Prix" {
+				t.Errorf("incorrect Name - expected '%s' but found '%s", "United States Grand Prix", e.Data.Meeting.Name)
+			}
+			if e.Data.Type != "Race" {
+				t.Errorf("incorrect session type - expected '%s' but found '%s", "Race", e.Data.Type)
+			}
+			close(i)
+		}
+	}
+}
+
+func TestDriverListMessages(t *testing.T) {
+	i := make(chan struct{})
+	d := make(chan error)
+	driverListCh := make(chan DriverDataEvent)
+	driverListMsg, err := os.ReadFile("./testdata/messages-with-driverlist.json")
+	if err != nil {
+		t.Error("unable to read static data required for test setup", err)
+		return
+	}
+	// start test server
+	ts, _ := newWSTestServer(t, func() websocket.Handler {
+		return func(conn *websocket.Conn) {
+			defer conn.Close()
+			var msg string
+			websocket.Message.Receive(conn, &msg)
+			// Send message
+			websocket.Message.Send(conn, driverListMsg)
+		}
+	}())
+	defer ts.Close()
+	// create and connect client to server
+	c := NewClient(
+		i,
+		d,
+		WithHTTPBaseURL(ts.URL),
+		WithWSBaseURL(httpToWs(t, ts.URL)),
+		WithDriverDataChannel(driverListCh),
+		WithLogger(testLogger{}),
+	)
+	c.Negotiate()
+	go c.Connect()
+	// process and test race control event
+	msgCount := 0
+	for wait := true; wait; {
+		select {
+		case err := <-d:
+			wait = false
+			if err != nil {
+				t.Errorf("should not have errored but found '%s'", err.Error())
+			}
+		case e := <-driverListCh:
+			msgCount++
+			// check all 4 messages
+			switch msgCount {
+			case 1:
+				if e.Data["4"].FirstName != "Lando" {
+					t.Errorf("invalid driverlist event - expected '%s' but found '%s'", "Lando", e.Data["4"].FirstName)
+				}
+				if e.Data["4"].Line != 1 {
+					t.Errorf("invalid driverlist event - expected '%d' but found '%d'", 1, e.Data["4"].Line)
+				}
+				if e.Data["4"].TeamColour != "FF8000" {
+					t.Errorf("invalid driverlist event - expected '%s' but found '%s'", "FF8000", e.Data["4"].TeamColour)
+				}
+			case 2:
+				if e.Data["4"].Line != 2 {
+					t.Errorf("invalid driverlist event - expected '%d' but found '%d'", 2, e.Data["4"].Line)
+				}
 				close(i)
 			}
 		}

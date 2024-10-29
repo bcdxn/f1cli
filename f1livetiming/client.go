@@ -21,6 +21,7 @@ type Client struct {
 	SessionInfoChannel chan SessionInfoEvent
 	WeatherChannel     chan WeatherDataEvent
 	RaceControlChannel chan RaceControlEvent
+	DriverListChannel  chan DriverDataEvent
 	ConnectionToken    string
 	Cookie             string
 	HTTPBaseURL        string
@@ -225,6 +226,12 @@ func WithRaceControlChannel(raceCtrlEvents chan RaceControlEvent) ClientOption {
 	}
 }
 
+func WithDriverDataChannel(driverDataEvents chan DriverDataEvent) ClientOption {
+	return func(c *Client) {
+		c.DriverListChannel = driverDataEvents
+	}
+}
+
 func WithLogger(l Logger) ClientOption {
 	return func(c *Client) {
 		c.logger = l
@@ -317,18 +324,35 @@ func sendSubscribe(sock *websocket.Conn) error {
 }
 
 func (c *Client) processReferenceMessage(referenceMessage F1ReferenceMessage) {
-	c.writeToSessionInfoChannel(referenceMessage.Reference.SessionInfo)
-	// c.writeToWeatherChannel(referenceMessage.Reference.WeatherData)
+	if c.SessionInfoChannel != nil {
+		c.writeToSessionInfoChannel(referenceMessage.Reference.SessionInfo)
+	}
+
+	if c.WeatherChannel != nil {
+		c.writeToWeatherChannel(referenceMessage.Reference.WeatherData)
+	}
+
+	if c.DriverListChannel != nil {
+		c.writeToDriverListChannel(referenceMessage.Reference.DriverData)
+	}
 }
 
 func (c *Client) processChangeMessage(changeMessage F1ChangeMessage) {
 	for _, m := range changeMessage.Messages {
 		if m.Hub == "Streaming" && m.Message == "feed" && len(m.Arguments) == 3 {
-			switch m.Arguments[0] {
+			msgType := m.Arguments[0]
+			msgData := m.Arguments[1]
+			switch msgType {
 			case "WeatherData":
-				c.writeToWeatherChannel(m.Arguments[1])
+				c.writeToWeatherChannel(msgData)
 			case "RaceControlMessages":
-				c.writeToRaceControlChannel(m.Arguments[1])
+				c.writeToRaceControlChannel(msgData)
+			case "SessionInfo":
+				c.writeToSessionInfoChannel(msgData)
+			case "DriverList":
+				c.writeToDriverListChannel(msgData)
+			default:
+				c.logger.Debug("unknown change message type:", msgData)
 			}
 		}
 	}

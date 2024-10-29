@@ -158,7 +158,7 @@ type DriverData struct {
 	RacingNumber  string `json:"RacingNumber"`
 	BroadcastName string `json:"BroadcastName"`
 	FullName      string `json:"FullName"`
-	Tla           string `json:"Tla"`
+	ShortName     string `json:"Tla"`
 	Line          int    `json:"Line"`
 	TeamName      string `json:"TeamName"`
 	TeamColour    string `json:"TeamColour"`
