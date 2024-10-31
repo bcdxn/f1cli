@@ -1,0 +1,23 @@
+{
+  "C": "d-6F917E1E-B,0|ChF,0|ChG,11|E,268|F,1EE0|G,1F0C|H,9|BA,3D9|BpM,0|I,4FF|J,2CB|K,87|L,2|M,A4|N,46|O,2|P,1F|Q,12|R,634C",
+  "M": [
+    {
+      "H": "Streaming",
+      "M": "feed",
+      "A": [
+        "WeatherData",
+        {
+          "AirTemp": "28.5",
+          "Humidity": "38.0",
+          "Pressure": "1005.4",
+          "Rainfall": "0",
+          "TrackTemp": "37.4",
+          "WindDirection": "166",
+          "WindSpeed": "1.6",
+          "_kf": true
+        },
+        "2024-10-19T22:41:19.93Z"
+      ]
+    }
+  ]
+}

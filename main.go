@@ -15,12 +15,18 @@ func main() {
 	i := make(chan struct{})
 	d := make(chan error)
 	sessionInfo := make(chan f1livetiming.SessionInfoEvent)
+	driverList := make(chan f1livetiming.DriverListEvent)
+	lapCount := make(chan f1livetiming.LapCountEvent)
+	timingData := make(chan f1livetiming.TimingDataEvent)
 
 	p := tea.NewProgram(tui.NewModel(tuiLogger, i, d), tea.WithAltScreen())
 	f1 := f1livetiming.NewClient(
 		i,
 		d,
 		f1livetiming.WithSessionInfoChannel(sessionInfo),
+		f1livetiming.WithDriverListChannel(driverList),
+		f1livetiming.WithLapCountChannel(lapCount),
+		f1livetiming.WithTimingDataChannel(timingData),
 		f1livetiming.WithLogger(f1Logger),
 	)
 
@@ -55,9 +61,23 @@ func main() {
 				p.Send(tui.DoneMsg{})
 			case si := <-sessionInfo:
 				f1Logger.Debug("received sessionInfo channel update")
-				f1Logger.Debug("sending sessionInfo tea message")
 				p.Send(tui.SessionInfoMsg{
 					SessionInfo: si.Data,
+				})
+			case dl := <-driverList:
+				f1Logger.Debug("received driverList channel update")
+				p.Send(tui.DriverListMsg{
+					DriverList: dl.Data,
+				})
+			case lc := <-lapCount:
+				f1Logger.Debug(("recevied lapCount channel update"))
+				p.Send(tui.LapCountMsg{
+					LapCount: lc.Data,
+				})
+			case td := <-timingData:
+				f1Logger.Debug(("recevied timingData channel update"))
+				p.Send(tui.TimingDataMsg{
+					TimingData: td.Data.Lines,
 				})
 			}
 		}

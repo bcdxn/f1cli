@@ -21,7 +21,9 @@ type Client struct {
 	SessionInfoChannel chan SessionInfoEvent
 	WeatherChannel     chan WeatherDataEvent
 	RaceControlChannel chan RaceControlEvent
-	DriverListChannel  chan DriverDataEvent
+	DriverListChannel  chan DriverListEvent
+	LapCountChannel    chan LapCountEvent
+	TmingDataChannel   chan TimingDataEvent
 	ConnectionToken    string
 	Cookie             string
 	HTTPBaseURL        string
@@ -168,7 +170,7 @@ func (c *Client) Connect() {
 			if err == nil && len(changeData.ChangeSetId) > 0 && len(changeData.Messages) > 0 {
 				c.logger.Debug("received change data message")
 				c.processChangeMessage(changeData)
-				return
+				continue
 			}
 			// Next try to parse a reference data message
 			var referenceData F1ReferenceMessage
@@ -226,9 +228,21 @@ func WithRaceControlChannel(raceCtrlEvents chan RaceControlEvent) ClientOption {
 	}
 }
 
-func WithDriverDataChannel(driverDataEvents chan DriverDataEvent) ClientOption {
+func WithDriverListChannel(driverlistEvents chan DriverListEvent) ClientOption {
 	return func(c *Client) {
-		c.DriverListChannel = driverDataEvents
+		c.DriverListChannel = driverlistEvents
+	}
+}
+
+func WithLapCountChannel(lapCountEvents chan LapCountEvent) ClientOption {
+	return func(c *Client) {
+		c.LapCountChannel = lapCountEvents
+	}
+}
+
+func WithTimingDataChannel(timingDataEvents chan TimingDataEvent) ClientOption {
+	return func(c *Client) {
+		c.TmingDataChannel = timingDataEvents
 	}
 }
 
@@ -324,17 +338,11 @@ func sendSubscribe(sock *websocket.Conn) error {
 }
 
 func (c *Client) processReferenceMessage(referenceMessage F1ReferenceMessage) {
-	if c.SessionInfoChannel != nil {
-		c.writeToSessionInfoChannel(referenceMessage.Reference.SessionInfo)
-	}
-
-	if c.WeatherChannel != nil {
-		c.writeToWeatherChannel(referenceMessage.Reference.WeatherData)
-	}
-
-	if c.DriverListChannel != nil {
-		c.writeToDriverListChannel(referenceMessage.Reference.DriverData)
-	}
+	c.writeToSessionInfoChannel(referenceMessage.Reference.SessionInfo)
+	c.writeToWeatherChannel(referenceMessage.Reference.WeatherData)
+	c.writeToDriverListChannel(referenceMessage.Reference.DriverList)
+	c.writeToLapCountChannel(referenceMessage.Reference.LapCount)
+	c.writeToTimingDataChannel(referenceMessage.Reference.TimingData)
 }
 
 func (c *Client) processChangeMessage(changeMessage F1ChangeMessage) {
@@ -351,6 +359,10 @@ func (c *Client) processChangeMessage(changeMessage F1ChangeMessage) {
 				c.writeToSessionInfoChannel(msgData)
 			case "DriverList":
 				c.writeToDriverListChannel(msgData)
+			case "LapCount":
+				c.writeToLapCountChannel(msgData)
+			case "TimingData":
+				c.writeToTimingDataChannel(msgData)
 			default:
 				c.logger.Debug("unknown change message type:", msgData)
 			}

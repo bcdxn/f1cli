@@ -2,7 +2,7 @@ package f1livetiming
 
 import "encoding/json"
 
-type DriverDataEvent struct {
+type DriverListEvent struct {
 	Data map[string]DriverData
 }
 
@@ -25,7 +25,7 @@ func (c *Client) writeToDriverListChannel(m any) {
 		return
 	}
 
-	dde := DriverDataEvent{
+	dde := DriverListEvent{
 		Data: driverData,
 	}
 

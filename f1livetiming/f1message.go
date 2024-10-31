@@ -12,13 +12,14 @@ type F1ReferenceMessage struct {
 		TimingStats         TimingStats           `json:"TimingStats"`
 		TimingAppData       TimingAppData         `json:"TimingAppData"`
 		WeatherData         WeatherData           `json:"WeatherData"`
-		DriverData          map[string]DriverData `json:"DriverData"`
+		DriverList          map[string]DriverData `json:"DriverList"`
 		RaceControlMessages struct {
 			Messages []RaceControlMessage `json:"Messages"`
 		} `json:"RaceControlMessages"`
 		SessionInfo SessionInfo `json:"SessionInfo"`
 		SessionData SessionData `json:"SessionData"`
 		TimingData  TimingData  `json:"TimingData"`
+		LapCount    LapCount    `json:"LapCount"`
 	} `json:"R"`
 	MessageInterval string `json:"I"`
 }
@@ -224,65 +225,76 @@ type SessionData struct {
 }
 
 type TimingData struct {
-	Lines map[string]struct {
-		TimeDiffToFastest       string `json:"TimeDiffToFastest"`
-		TimeDiffToPositionAhead string `json:"TimeDiffToPositionAhead"`
-		Line                    int    `json:"Line"`
-		Position                string `json:"Position"`
-		ShowPosition            bool   `json:"ShowPosition"`
-		RacingNumber            string `json:"RacingNumber"`
-		Retired                 bool   `json:"Retired"`
-		InPit                   bool   `json:"InPit"`
-		PitOut                  bool   `json:"PitOut"`
-		Stopped                 bool   `json:"Stopped"`
-		Status                  int    `json:"Status"`
-		Sectors                 []struct {
-			Stopped         bool   `json:"Stopped"`
+	Lines map[string]DriverTimingData `json:"Lines"`
+}
+
+type DriverTimingData struct {
+	TimeDiffToFastest       string `json:"TimeDiffToFastest"`
+	TimeDiffToPositionAhead string `json:"TimeDiffToPositionAhead"`
+	Line                    int    `json:"Line"`
+	Position                string `json:"Position"`
+	ShowPosition            bool   `json:"ShowPosition"`
+	RacingNumber            string `json:"RacingNumber"`
+	Retired                 bool   `json:"Retired"`
+	InPit                   bool   `json:"InPit"`
+	PitOut                  bool   `json:"PitOut"`
+	Stopped                 bool   `json:"Stopped"`
+	Status                  int    `json:"Status"`
+	GapToLeader             string `json:"GapToLeader"`
+	IntervalToPositionAhead struct {
+		Value string `json:"Value"`
+	} `json:"IntervalToPositionAhead"`
+	Sectors []struct {
+		Stopped         bool   `json:"Stopped"`
+		Value           string `json:"Value"`
+		Status          int    `json:"Status"`
+		OverallFastest  bool   `json:"OverallFastest"`
+		PersonalFastest bool   `json:"PersonalFastest"`
+		Segments        []struct {
+			Status int `json:"Status"`
+		} `json:"Segments"`
+		PreviousValue string `json:"PreviousValue"`
+	} `json:"Sectors"`
+	Speeds struct {
+		I1 struct {
 			Value           string `json:"Value"`
 			Status          int    `json:"Status"`
 			OverallFastest  bool   `json:"OverallFastest"`
 			PersonalFastest bool   `json:"PersonalFastest"`
-			Segments        []struct {
-				Status int `json:"Status"`
-			} `json:"Segments"`
-			PreviousValue string `json:"PreviousValue"`
-		} `json:"Sectors"`
-		Speeds struct {
-			I1 struct {
-				Value           string `json:"Value"`
-				Status          int    `json:"Status"`
-				OverallFastest  bool   `json:"OverallFastest"`
-				PersonalFastest bool   `json:"PersonalFastest"`
-			} `json:"I1"`
-			I2 struct {
-				Value           string `json:"Value"`
-				Status          int    `json:"Status"`
-				OverallFastest  bool   `json:"OverallFastest"`
-				PersonalFastest bool   `json:"PersonalFastest"`
-			} `json:"I2"`
-			Fl struct {
-				Value           string `json:"Value"`
-				Status          int    `json:"Status"`
-				OverallFastest  bool   `json:"OverallFastest"`
-				PersonalFastest bool   `json:"PersonalFastest"`
-			} `json:"FL"`
-			St struct {
-				Value           string `json:"Value"`
-				Status          int    `json:"Status"`
-				OverallFastest  bool   `json:"OverallFastest"`
-				PersonalFastest bool   `json:"PersonalFastest"`
-			} `json:"ST"`
-		} `json:"Speeds"`
-		BestLapTime struct {
-			Value string `json:"Value"`
-			Lap   int    `json:"Lap"`
-		} `json:"BestLapTime"`
-		LastLapTime struct {
+		} `json:"I1"`
+		I2 struct {
 			Value           string `json:"Value"`
 			Status          int    `json:"Status"`
 			OverallFastest  bool   `json:"OverallFastest"`
 			PersonalFastest bool   `json:"PersonalFastest"`
-		} `json:"LastLapTime"`
-		NumberOfLaps int `json:"NumberOfLaps"`
-	} `json:"Lines"`
+		} `json:"I2"`
+		Fl struct {
+			Value           string `json:"Value"`
+			Status          int    `json:"Status"`
+			OverallFastest  bool   `json:"OverallFastest"`
+			PersonalFastest bool   `json:"PersonalFastest"`
+		} `json:"FL"`
+		St struct {
+			Value           string `json:"Value"`
+			Status          int    `json:"Status"`
+			OverallFastest  bool   `json:"OverallFastest"`
+			PersonalFastest bool   `json:"PersonalFastest"`
+		} `json:"ST"`
+	} `json:"Speeds"`
+	BestLapTime struct {
+		Value string `json:"Value"`
+		Lap   int    `json:"Lap"`
+	} `json:"BestLapTime"`
+	LastLapTime struct {
+		Value           string `json:"Value"`
+		Status          int    `json:"Status"`
+		OverallFastest  bool   `json:"OverallFastest"`
+		PersonalFastest bool   `json:"PersonalFastest"`
+	} `json:"LastLapTime"`
+	NumberOfLaps int `json:"NumberOfLaps"`
+}
+
+type LapCount struct {
+	CurrentLap uint8 `json:"CurrentLap"`
+	TotalLaps  uint8 `json:"TotalLaps"`
 }

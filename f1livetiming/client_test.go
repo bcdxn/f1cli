@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/websocket"
@@ -106,7 +107,8 @@ func TestReferenceMessage(t *testing.T) {
 	i := make(chan struct{})
 	d := make(chan error)
 	sessionInfoCh := make(chan SessionInfoEvent)
-	referenceDataMsg, err := os.ReadFile("./testdata/messages-with-full-reference.json")
+	driverListCh := make(chan DriverListEvent)
+	referenceDataMsg, err := os.ReadFile("./testdata/reference-message.json")
 	if err != nil {
 		t.Error("unable to read static data required for test setup", err)
 	}
@@ -127,258 +129,194 @@ func TestReferenceMessage(t *testing.T) {
 		d,
 		WithHTTPBaseURL(ts.URL),
 		WithWSBaseURL(httpToWs(t, ts.URL)),
+		WithDriverListChannel(driverListCh),
 		WithSessionInfoChannel(sessionInfoCh),
 		WithLogger(testLogger{}),
 	)
 	c.Negotiate()
 	go c.Connect()
 	// process and test session info event
-	for wait := true; wait; {
+	msgCount := 0
+	for listening := true; listening; {
 		select {
 		case err := <-d:
-			wait = false
+			listening = false
 			if err != nil {
 				t.Errorf("should not have errored but found '%s'", err.Error())
 			}
 		case e := <-sessionInfoCh:
-			if e.Data.Meeting.Name != "United States Grand Prix" {
-				t.Errorf("incorrect Name - expected '%s' but found '%s", "United States Grand Prix", e.Data.Meeting.Name)
-			}
-			if e.Data.Type != "Race" {
-				t.Errorf("incorrect session type - expected '%s' but found '%s", "Race", e.Data.Type)
-			}
-			close(i)
-		}
-	}
-}
-
-// TestF1LivingTimingMessages ensures that messages
-func TestWeatherDataMessages(t *testing.T) {
-	i := make(chan struct{})
-	d := make(chan error)
-	weatherCh := make(chan WeatherDataEvent)
-	weatherMsg, err := os.ReadFile("./testdata/messages-with-weather.json")
-	if err != nil {
-		t.Error("unable to read static data required for test setup", err)
-		return
-	}
-	// start test server
-	ts, _ := newWSTestServer(t, func() websocket.Handler {
-		return func(conn *websocket.Conn) {
-			defer conn.Close()
-			var msg string
-			websocket.Message.Receive(conn, &msg)
-			// Send message
-			websocket.Message.Send(conn, weatherMsg)
-		}
-	}())
-	defer ts.Close()
-	// create and connect client to server
-	c := NewClient(
-		i,
-		d,
-		WithHTTPBaseURL(ts.URL),
-		WithWSBaseURL(httpToWs(t, ts.URL)),
-		WithWeatherChannel(weatherCh),
-		WithLogger(testLogger{}),
-	)
-	c.Negotiate()
-	go c.Connect()
-	// process and test weather event
-	for wait := true; wait; {
-		select {
-		case err := <-d:
-			wait = false
-			if err != nil {
-				t.Errorf("should not have errored but found '%s'", err.Error())
-			}
-		case e := <-weatherCh:
-			if e.Data.AirTemp != "28.5" {
-				t.Errorf("incorrect AirTemp - expected '%s' but found '%s", "28.5", e.Data.AirTemp)
-			}
-			close(i)
-		}
-	}
-}
-
-func TestRaceControlMessages(t *testing.T) {
-	i := make(chan struct{})
-	d := make(chan error)
-	racectrlCh := make(chan RaceControlEvent)
-	racectrlMsg, err := os.ReadFile("./testdata/messages-with-racectrl.json")
-	if err != nil {
-		t.Error("unable to read static data required for test setup", err)
-		return
-	}
-	// start test server
-	ts, _ := newWSTestServer(t, func() websocket.Handler {
-		return func(conn *websocket.Conn) {
-			defer conn.Close()
-			var msg string
-			websocket.Message.Receive(conn, &msg)
-			// Send message
-			websocket.Message.Send(conn, racectrlMsg)
-		}
-	}())
-	defer ts.Close()
-	// create and connect client to server
-	c := NewClient(
-		i,
-		d,
-		WithHTTPBaseURL(ts.URL),
-		WithWSBaseURL(httpToWs(t, ts.URL)),
-		WithRaceControlChannel(racectrlCh),
-		WithLogger(testLogger{}),
-	)
-	c.Negotiate()
-	go c.Connect()
-	// process and test race control event
-	msgCount := 0
-	for wait := true; wait; {
-		select {
-		case err := <-d:
-			wait = false
-			if err != nil {
-				t.Errorf("should not have errored but found '%s'", err.Error())
-			}
-		case e := <-racectrlCh:
 			msgCount++
-			// check all 4 messages
-			switch msgCount {
-			case 1:
-				if e.Data.Lap != 19 {
-					t.Errorf("invalid race ctrl event - expected '%d' but found '%d'", 19, e.Data.Lap)
-				}
-				if e.Data.Category != "Flag" {
-					t.Errorf("invalid race ctrl event - expected '%s' but found '%s'", "Flag", e.Data.Category)
-				}
-			case 2:
-				if e.Data.Category != "Drs" {
-					t.Errorf("invalid race ctrl event - expected '%s' but found '%s'", "Drs", e.Data.Category)
-				}
-				if e.Data.Status != "DISABLED" {
-					t.Errorf("invalid race ctrl event - expected '%s' but found '%s'", "DISABLED", e.Data.Status)
-				}
-			case 4:
-				close(i)
-			}
+			testSessionInfo(t, e)
+		case e := <-driverListCh:
+			msgCount++
+			testDriverList(t, e)
 		}
-	}
-}
-
-func TestSessionInfoMessages(t *testing.T) {
-	i := make(chan struct{})
-	d := make(chan error)
-	sessionInfoCh := make(chan SessionInfoEvent)
-	sessionInfoMsg, err := os.ReadFile("./testdata/messages-with-sessioninfo.json")
-	if err != nil {
-		t.Error("unable to read static data required for test setup", err)
-		return
-	}
-	// start test server
-	ts, _ := newWSTestServer(t, func() websocket.Handler {
-		return func(conn *websocket.Conn) {
-			defer conn.Close()
-			var msg string
-			websocket.Message.Receive(conn, &msg)
-			// Send message
-			websocket.Message.Send(conn, sessionInfoMsg)
-		}
-	}())
-	defer ts.Close()
-	// create and connect client to server
-	c := NewClient(
-		i,
-		d,
-		WithHTTPBaseURL(ts.URL),
-		WithWSBaseURL(httpToWs(t, ts.URL)),
-		WithSessionInfoChannel(sessionInfoCh),
-		WithLogger(testLogger{}),
-	)
-	c.Negotiate()
-	go c.Connect()
-	// process and test session info event
-	for wait := true; wait; {
-		select {
-		case err := <-d:
-			wait = false
-			if err != nil {
-				t.Errorf("should not have errored but found '%s'", err.Error())
-			}
-		case e := <-sessionInfoCh:
-			if e.Data.Meeting.Name != "United States Grand Prix" {
-				t.Errorf("incorrect Name - expected '%s' but found '%s", "United States Grand Prix", e.Data.Meeting.Name)
-			}
-			if e.Data.Type != "Race" {
-				t.Errorf("incorrect session type - expected '%s' but found '%s", "Race", e.Data.Type)
-			}
+		// Interrupt the client if we've processed all of the messages we need to process
+		if msgCount >= 2 && listening {
 			close(i)
 		}
 	}
 }
 
-func TestDriverListMessages(t *testing.T) {
+func TestChangeMessages(t *testing.T) {
 	i := make(chan struct{})
 	d := make(chan error)
-	driverListCh := make(chan DriverDataEvent)
-	driverListMsg, err := os.ReadFile("./testdata/messages-with-driverlist.json")
-	if err != nil {
-		t.Error("unable to read static data required for test setup", err)
-		return
-	}
+	driverListCh := make(chan DriverListEvent)
+	lapCountCh := make(chan LapCountEvent)
+	timingDataCh := make(chan TimingDataEvent)
+	sessionInfoCh := make(chan SessionInfoEvent)
+	racectrlMsgCh := make(chan RaceControlEvent)
+	weatherDataCh := make(chan WeatherDataEvent)
+	msgs := getAllMessages(t)
+
 	// start test server
 	ts, _ := newWSTestServer(t, func() websocket.Handler {
 		return func(conn *websocket.Conn) {
 			defer conn.Close()
 			var msg string
 			websocket.Message.Receive(conn, &msg)
-			// Send message
-			websocket.Message.Send(conn, driverListMsg)
+
+			for _, msg := range msgs {
+				// Send message
+				websocket.Message.Send(conn, msg)
+			}
 		}
 	}())
 	defer ts.Close()
+
 	// create and connect client to server
 	c := NewClient(
 		i,
 		d,
 		WithHTTPBaseURL(ts.URL),
 		WithWSBaseURL(httpToWs(t, ts.URL)),
-		WithDriverDataChannel(driverListCh),
+		WithDriverListChannel(driverListCh),
+		WithLapCountChannel(lapCountCh),
+		WithTimingDataChannel(timingDataCh),
+		WithSessionInfoChannel(sessionInfoCh),
+		WithRaceControlChannel(racectrlMsgCh),
+		WithWeatherChannel(weatherDataCh),
 		WithLogger(testLogger{}),
 	)
 	c.Negotiate()
 	go c.Connect()
-	// process and test race control event
 	msgCount := 0
-	for wait := true; wait; {
+
+	// process and test events
+	for listening := true; listening; {
 		select {
 		case err := <-d:
-			wait = false
+			listening = false
 			if err != nil {
-				t.Errorf("should not have errored but found '%s'", err.Error())
+				t.Fatalf("should not have errored but found '%s'", err.Error())
 			}
 		case e := <-driverListCh:
 			msgCount++
-			// check all 4 messages
-			switch msgCount {
-			case 1:
-				if e.Data["4"].FirstName != "Lando" {
-					t.Errorf("invalid driverlist event - expected '%s' but found '%s'", "Lando", e.Data["4"].FirstName)
-				}
-				if e.Data["4"].Line != 1 {
-					t.Errorf("invalid driverlist event - expected '%d' but found '%d'", 1, e.Data["4"].Line)
-				}
-				if e.Data["4"].TeamColour != "FF8000" {
-					t.Errorf("invalid driverlist event - expected '%s' but found '%s'", "FF8000", e.Data["4"].TeamColour)
-				}
-			case 2:
-				if e.Data["4"].Line != 2 {
-					t.Errorf("invalid driverlist event - expected '%d' but found '%d'", 2, e.Data["4"].Line)
-				}
-				close(i)
-			}
+			testDriverList(t, e)
+		case e := <-lapCountCh:
+			msgCount++
+			testLapCount(t, e)
+		case e := <-timingDataCh:
+			msgCount++
+			testTimingData(t, e)
+		case e := <-sessionInfoCh:
+			msgCount++
+			testSessionInfo(t, e)
+		case e := <-racectrlMsgCh:
+			msgCount++
+			testRaceControlMessages(t, e)
+		case e := <-weatherDataCh:
+			msgCount++
+			testWeatherData(t, e)
+		}
+		// Interrupt the client if we've processed all of the messages we need to process
+		if msgCount >= len(msgs) && listening {
+			close(i)
 		}
 	}
+}
+
+func testLapCount(t *testing.T, e LapCountEvent) {
+	t.Run("LapCount", func(t *testing.T) {
+		if e.Data.CurrentLap != 2 {
+			t.Errorf("incorrect CurrentLap - expected '%d' but found '%d", 2, e.Data.CurrentLap)
+		}
+	})
+}
+
+func testTimingData(t *testing.T, e TimingDataEvent) {
+	t.Run("TimingData", func(t *testing.T) {
+		if driverData, ok := e.Data.Lines["55"]; ok {
+			if driverData.GapToLeader != "+12.562" {
+				t.Errorf("incorrect TimingData - expected '%s' but found '%s", "+12.562", driverData.GapToLeader)
+			}
+		} else {
+			t.Error("timing data did not container expected driver")
+		}
+	})
+}
+
+func testDriverList(t *testing.T, e DriverListEvent) {
+	t.Run("DriverList", func(t *testing.T) {
+		if e.Data["4"].FirstName != "Lando" {
+			t.Errorf("invalid driverlist event - expected '%s' but found '%s'", "Lando", e.Data["4"].FirstName)
+		}
+		if e.Data["4"].Line != 1 {
+			t.Errorf("invalid driverlist event - expected '%d' but found '%d'", 1, e.Data["4"].Line)
+		}
+		if e.Data["4"].TeamColour != "FF8000" {
+			t.Errorf("invalid driverlist event - expected '%s' but found '%s'", "FF8000", e.Data["4"].TeamColour)
+		}
+	})
+}
+
+func testSessionInfo(t *testing.T, e SessionInfoEvent) {
+	t.Run("SessionInfo", func(t *testing.T) {
+		if e.Data.Meeting.Name != "United States Grand Prix" {
+			t.Errorf("incorrect Name - expected '%s' but found '%s", "United States Grand Prix", e.Data.Meeting.Name)
+		}
+		if e.Data.Type != "Race" {
+			t.Errorf("incorrect session type - expected '%s' but found '%s", "Race", e.Data.Type)
+		}
+	})
+}
+
+func testRaceControlMessages(t *testing.T, e RaceControlEvent) {
+	t.Run("RaceControlMessages", func(t *testing.T) {
+		if e.Data.Lap != 19 {
+			t.Errorf("invalid race ctrl event - expected '%d' but found '%d'", 19, e.Data.Lap)
+		}
+		if e.Data.Category != "Flag" {
+			t.Errorf("invalid race ctrl event - expected '%s' but found '%s'", "Flag", e.Data.Category)
+		}
+	})
+}
+
+func testWeatherData(t *testing.T, e WeatherDataEvent) {
+	if e.Data.AirTemp != "28.5" {
+		t.Errorf("incorrect AirTemp - expected '%s' but found '%s", "28.5", e.Data.AirTemp)
+	}
+}
+
+func getAllMessages(t *testing.T) []string {
+	t.Helper()
+	dir := strings.Join([]string{"testdata", "change-messages"}, string(os.PathSeparator))
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal("error reading message files required for tests")
+	}
+
+	msgs := make([]string, 0)
+	for _, file := range files {
+		p := strings.Join([]string{dir, file.Name()}, string(os.PathSeparator))
+		msg, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("error reading message file '%s' required for tests", p)
+		}
+		msgs = append(msgs, string(msg))
+	}
+
+	return msgs
 }
 
 func newHttpTestServer(t *testing.T) *httptest.Server {
