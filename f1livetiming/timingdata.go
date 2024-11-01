@@ -7,7 +7,7 @@ type TimingDataEvent struct {
 }
 
 func (c *Client) writeToTimingDataChannel(m any) {
-	if c.TmingDataChannel == nil {
+	if c.TimingDataChannel == nil {
 		// The consumer did not ask for timing data events; no need to process
 		return
 	}
@@ -29,5 +29,5 @@ func (c *Client) writeToTimingDataChannel(m any) {
 		Data: timingData,
 	}
 
-	c.TmingDataChannel <- td
+	c.TimingDataChannel <- td
 }

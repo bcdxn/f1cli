@@ -8,21 +8,22 @@ There are two core types of messages:
     ```json
     {
         "R": {
-            "Heartbeat": {},
             "CarData.z": "",
-            "Position.z": "",
-            "ExtrapolatedClock": {},
-            "TopThree": {},
-            "TimingStats": {},
-            "TimingAppData": {},
-            "WeatherData": {},
-            "TrackStatus": {},
             "DriverList": {},
-            "RaceControlMessages": {},
-            "SessionInfo": {},
-            "SessionData": {},
+            "ExtrapolatedClock": {},
+            "Heartbeat": {},
             "LapCount": {},
-            "TimingData": {}
+            "Position.z": "",
+            "RaceControlMessages": {},
+            "SessionData": {},
+            "SessionInfo": {},
+            "TeamRadio": {},
+            "TimingAppData": {},
+            "TimingData": {},
+            "TimingStats": {},
+            "TopThree": {},
+            "TrackStatus": {},
+            "WeatherData": {}
         },
         // Interval in seconds of change data messages
         // requested by client

@@ -1,12 +1,15 @@
 package f1livetiming
 
-import "encoding/json"
+import (
+	"encoding/json"
+)
 
 type SessionInfoEvent struct {
 	Data SessionInfo
 }
 
 func (c *Client) writeToSessionInfoChannel(m any) {
+	c.logger.Debug("??????? writing to session info channel")
 	if c.SessionInfoChannel == nil {
 		// The consumer did not ask for session info events; no need to process
 		return

@@ -18,6 +18,7 @@ func main() {
 	driverList := make(chan f1livetiming.DriverListEvent)
 	lapCount := make(chan f1livetiming.LapCountEvent)
 	timingData := make(chan f1livetiming.TimingDataEvent)
+	sessionData := make(chan f1livetiming.SessionDataEvent)
 
 	p := tea.NewProgram(tui.NewModel(tuiLogger, i, d), tea.WithAltScreen())
 	f1 := f1livetiming.NewClient(
@@ -27,6 +28,7 @@ func main() {
 		f1livetiming.WithDriverListChannel(driverList),
 		f1livetiming.WithLapCountChannel(lapCount),
 		f1livetiming.WithTimingDataChannel(timingData),
+		f1livetiming.WithSessionDataChannel(sessionData),
 		f1livetiming.WithLogger(f1Logger),
 	)
 
@@ -61,23 +63,33 @@ func main() {
 				p.Send(tui.DoneMsg{})
 			case si := <-sessionInfo:
 				f1Logger.Debug("received sessionInfo channel update")
+				tuiLogger.Debug("sending tui.SessionInfoMsg")
 				p.Send(tui.SessionInfoMsg{
 					SessionInfo: si.Data,
 				})
 			case dl := <-driverList:
 				f1Logger.Debug("received driverList channel update")
+				tuiLogger.Debug("sending tui.DriverListMsg")
 				p.Send(tui.DriverListMsg{
 					DriverList: dl.Data,
 				})
 			case lc := <-lapCount:
-				f1Logger.Debug(("recevied lapCount channel update"))
+				f1Logger.Debug("recevied lapCount channel update")
+				tuiLogger.Debug("sending tui.LapCountMsg")
 				p.Send(tui.LapCountMsg{
 					LapCount: lc.Data,
 				})
 			case td := <-timingData:
-				f1Logger.Debug(("recevied timingData channel update"))
+				f1Logger.Debug("recevied timingData channel update")
+				tuiLogger.Debug("sending tui.TimingDataMsg")
 				p.Send(tui.TimingDataMsg{
 					TimingData: td.Data.Lines,
+				})
+			case sd := <-sessionData:
+				f1Logger.Debug("received sessionData channel update")
+				tuiLogger.Debug("sending tui.SessionDataMsg")
+				p.Send(tui.SessionDataMsg{
+					SessionData: sd.Data,
 				})
 			}
 		}
@@ -88,20 +100,4 @@ func main() {
 	if err != nil {
 		log.Fatal("Error starting TUI:", err.Error())
 	}
-
-	// i := make(chan struct{})
-	// d := make(chan error)
-	// weatherEvents := make(chan f1livetiming.WeatherDataEvent)
-
-	// c := f1livetiming.NewClient(i, d, f1livetiming.WithWeatherChannel(weatherEvents))
-	// err := c.Negotiate()
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// go c.Connect()
-	// <-interrupt // wait for interrupt OS signal
-	// close(i)    // notify client of interrupt
-	// <-d         // wait for client to gracefully close connection
-	// fmt.Println("done!")
 }

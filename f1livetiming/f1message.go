@@ -16,10 +16,10 @@ type F1ReferenceMessage struct {
 		RaceControlMessages struct {
 			Messages []RaceControlMessage `json:"Messages"`
 		} `json:"RaceControlMessages"`
-		SessionInfo SessionInfo `json:"SessionInfo"`
-		SessionData SessionData `json:"SessionData"`
-		TimingData  TimingData  `json:"TimingData"`
-		LapCount    LapCount    `json:"LapCount"`
+		SessionInfo SessionInfo          `json:"SessionInfo"`
+		SessionData ReferenceSessionData `json:"SessionData"`
+		TimingData  TimingData           `json:"TimingData"`
+		LapCount    LapCount             `json:"LapCount"`
 	} `json:"R"`
 	MessageInterval string `json:"I"`
 }
@@ -125,19 +125,22 @@ type TimingStats struct {
 
 type TimingAppData struct {
 	Lines map[string]struct {
-		RacingNumber string `json:"RacingNumber"`
-		Stints       []struct {
-			LapFlags        int    `json:"LapFlags"`
-			Compound        string `json:"Compound"`
-			New             string `json:"New"`
-			TyresNotChanged string `json:"TyresNotChanged"`
-			TotalLaps       int    `json:"TotalLaps"`
-			StartLaps       int    `json:"StartLaps"`
-			LapTime         string `json:"LapTime"`
-			LapNumber       int    `json:"LapNumber"`
-		} `json:"Stints"`
-		Line int `json:"Line"`
+		RacingNumber string  `json:"RacingNumber"`
+		Line         int     `json:"Line"`
+		GridPos      string  `json:"GridPos"`
+		Stints       []Stint `json:"Stints"`
 	} `json:"Lines"`
+}
+
+type Stint struct {
+	LapFlags        int    `json:"LapFlags"`
+	Compound        string `json:"Compound"`
+	New             string `json:"New"`
+	TyresNotChanged string `json:"TyresNotChanged"`
+	TotalLaps       int    `json:"TotalLaps"`
+	StartLaps       int    `json:"StartLaps"`
+	LapTime         string `json:"LapTime"`
+	LapNumber       int    `json:"LapNumber"`
 }
 
 type WeatherData struct {
@@ -215,13 +218,25 @@ type SessionInfo struct {
 	Path      string `json:"Path"`
 }
 
-type SessionData struct {
-	Series       []any `json:"Series"`
-	StatusSeries []struct {
-		Utc           time.Time `json:"Utc"`
-		TrackStatus   string    `json:"TrackStatus,omitempty"`
-		SessionStatus string    `json:"SessionStatus,omitempty"`
-	} `json:"StatusSeries"`
+type ReferenceSessionData struct {
+	Series       []SessionDataSeries       `json:"Series"`
+	StatusSeries []SessionDataStatusSeries `json:"StatusSeries"`
+}
+
+type ChangeSessionData struct {
+	Series       map[string]SessionDataSeries       `json:"Series"`
+	StatusSeries map[string]SessionDataStatusSeries `json:"StatusSeries"`
+}
+
+type SessionDataSeries struct {
+	UTC time.Time `json:"Utc"`
+	Lap uint8     `json:"Lap"`
+}
+
+type SessionDataStatusSeries struct {
+	Utc           time.Time `json:"Utc"`
+	TrackStatus   string    `json:"TrackStatus"`
+	SessionStatus string    `json:"SessionStatus"`
 }
 
 type TimingData struct {
@@ -242,7 +257,8 @@ type DriverTimingData struct {
 	Status                  int    `json:"Status"`
 	GapToLeader             string `json:"GapToLeader"`
 	IntervalToPositionAhead struct {
-		Value string `json:"Value"`
+		Value    string `json:"Value"`
+		Catching bool   `json:"Catching"`
 	} `json:"IntervalToPositionAhead"`
 	Sectors []struct {
 		Stopped         bool   `json:"Stopped"`

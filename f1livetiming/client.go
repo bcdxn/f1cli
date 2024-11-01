@@ -18,12 +18,13 @@ type Client struct {
 	logger             Logger
 	Interrupt          chan struct{}
 	Done               chan error
-	SessionInfoChannel chan SessionInfoEvent
-	WeatherChannel     chan WeatherDataEvent
-	RaceControlChannel chan RaceControlEvent
 	DriverListChannel  chan DriverListEvent
 	LapCountChannel    chan LapCountEvent
-	TmingDataChannel   chan TimingDataEvent
+	RaceControlChannel chan RaceControlEvent
+	SessionDataChannel chan SessionDataEvent
+	SessionInfoChannel chan SessionInfoEvent
+	TimingDataChannel  chan TimingDataEvent
+	WeatherChannel     chan WeatherDataEvent
 	ConnectionToken    string
 	Cookie             string
 	HTTPBaseURL        string
@@ -242,7 +243,13 @@ func WithLapCountChannel(lapCountEvents chan LapCountEvent) ClientOption {
 
 func WithTimingDataChannel(timingDataEvents chan TimingDataEvent) ClientOption {
 	return func(c *Client) {
-		c.TmingDataChannel = timingDataEvents
+		c.TimingDataChannel = timingDataEvents
+	}
+}
+
+func WithSessionDataChannel(sessionDataEvents chan SessionDataEvent) ClientOption {
+	return func(c *Client) {
+		c.SessionDataChannel = sessionDataEvents
 	}
 }
 
@@ -338,11 +345,13 @@ func sendSubscribe(sock *websocket.Conn) error {
 }
 
 func (c *Client) processReferenceMessage(referenceMessage F1ReferenceMessage) {
+	c.logger.Debug("processing reference message")
 	c.writeToSessionInfoChannel(referenceMessage.Reference.SessionInfo)
 	c.writeToWeatherChannel(referenceMessage.Reference.WeatherData)
 	c.writeToDriverListChannel(referenceMessage.Reference.DriverList)
 	c.writeToLapCountChannel(referenceMessage.Reference.LapCount)
 	c.writeToTimingDataChannel(referenceMessage.Reference.TimingData)
+	c.writeReferenceToSessionDataChannel(referenceMessage.Reference.SessionData)
 }
 
 func (c *Client) processChangeMessage(changeMessage F1ChangeMessage) {
@@ -363,6 +372,8 @@ func (c *Client) processChangeMessage(changeMessage F1ChangeMessage) {
 				c.writeToLapCountChannel(msgData)
 			case "TimingData":
 				c.writeToTimingDataChannel(msgData)
+			case "SessionData":
+				c.writeChangeToSessionDataChannel(msgData)
 			default:
 				c.logger.Debug("unknown change message type:", msgData)
 			}

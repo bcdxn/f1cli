@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 
 	"dario.cat/mergo"
 	"github.com/bcdxn/go-f1/f1livetiming"
@@ -11,8 +12,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/evertras/bubble-table/table"
 )
-
-var docStyle = lipgloss.NewStyle().Margin(1, 2)
 
 type Model struct {
 	logger             tealogger.Logger
@@ -28,6 +27,10 @@ type Model struct {
 	driverList         map[string]f1livetiming.DriverData
 	timingData         map[string]f1livetiming.DriverTimingData
 	lapCount           f1livetiming.LapCount
+	lastTrackStatus    string
+	lastSessionStatus  string
+	latestSeriesStatus string
+	fastestLapOwner    string
 	table              table.Model
 }
 
@@ -52,6 +55,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return lapCountMsgHandler(m, msg)
 	case TimingDataMsg:
 		return timingDataMsgHandler(m, msg)
+	case SessionDataMsg:
+		return sessionDataMsgHandler(m, msg)
 	case UpdateTableMsg:
 		return updateTableMsgHandler(m, msg)
 	case DoneMsg:
@@ -76,11 +81,20 @@ func (m Model) View() string {
 			m.loadingMsg,
 		)
 	} else {
+		padding := lipgloss.PlaceHorizontal(
+			m.width-4,
+			lipgloss.Center,
+			"",
+			lipgloss.WithWhitespaceChars("."),
+			lipgloss.WithWhitespaceForeground(subtle),
+		)
+
 		v = lipgloss.JoinVertical(
 			lipgloss.Top,
-			getTitle(m),
-			getSubTitle(m),
-			m.table.View(),
+			titleView(m),
+			msgView(m, padding),
+			subtitleView(m),
+			tableView(m, padding),
 		)
 	}
 
@@ -129,6 +143,10 @@ type TimingDataMsg struct {
 
 type LapCountMsg struct {
 	LapCount f1livetiming.LapCount
+}
+
+type SessionDataMsg struct {
+	SessionData f1livetiming.ChangeSessionData
 }
 
 type UpdateTableMsg struct{}
@@ -195,6 +213,11 @@ func lapCountMsgHandler(m Model, msg LapCountMsg) (Model, tea.Cmd) {
 
 func timingDataMsgHandler(m Model, msg TimingDataMsg) (Model, tea.Cmd) {
 	for key, newTiming := range msg.TimingData {
+		// Store fasted lap if we have one
+		if newTiming.LastLapTime.OverallFastest {
+			m.fastestLapOwner = key
+		}
+		// Merge timing data delta with existing data
 		if oldTiming, ok := m.timingData[key]; ok {
 			mergo.Merge(&oldTiming, newTiming, mergo.WithOverride)
 		} else {
@@ -204,28 +227,50 @@ func timingDataMsgHandler(m Model, msg TimingDataMsg) (Model, tea.Cmd) {
 	return m, updateTableCmd()
 }
 
+func sessionDataMsgHandler(m Model, msg SessionDataMsg) (Model, tea.Cmd) {
+	latestTrackStatusKey := 0
+	latestSessionStatusKey := 0
+	for key, status := range msg.SessionData.StatusSeries {
+		i, err := strconv.Atoi(key)
+		if err != nil {
+			m.logger.Debug("warning: SessionData.StatusSeries map key was not an integer - found", key)
+			continue
+		}
+		if i > latestTrackStatusKey && status.TrackStatus != "" {
+			m.logger.Debug("setting lastTrackStatus", status.TrackStatus)
+			latestTrackStatusKey = i
+			m.lastTrackStatus = status.TrackStatus
+		}
+		if i > latestSessionStatusKey && status.SessionStatus != "" {
+			m.logger.Debug("setting lastSessionStatus", status.SessionStatus)
+			latestSessionStatusKey = i
+			m.lastSessionStatus = status.SessionStatus
+		}
+	}
+
+	return m, updateTableCmd()
+}
+
 func updateTableMsgHandler(m Model, _ UpdateTableMsg) (Model, tea.Cmd) {
 	rows := make([]table.Row, 0, 20)
 	for driverNumber, data := range m.driverList {
 		lastlap, pBest, oBest := getLastLap(m, driverNumber)
 
-		lastlapStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ebcb8b"))
+		lastlapStyle := styleYellow
 
 		if lastlap == "-" {
 			lastlapStyle = lipgloss.NewStyle()
-		} else if pBest {
-			lastlapStyle.Foreground(lipgloss.Color("#a3be8c"))
 		} else if oBest {
-			lastlapStyle.Foreground(lipgloss.Color("#b48ead"))
+			lastlapStyle = stylePurple
+		} else if pBest {
+			lastlapStyle = styleGreen
 		}
 
 		rows = append(rows, table.NewRow(table.RowData{
 			"position": data.Line,
-			"driver": table.NewStyledCell(
-				data.ShortName,
-				lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#%s", data.TeamColour))),
-			),
+			"driver":   getDriver(m, driverNumber),
 			"interval": getInterval(m, driverNumber),
+			"leader":   getLeaderGap(m, driverNumber),
 			"lastlap":  table.NewStyledCell(lastlap, lastlapStyle),
 		}))
 	}
@@ -238,18 +283,82 @@ func updateTableMsgHandler(m Model, _ UpdateTableMsg) (Model, tea.Cmd) {
 /* View Helper Functions
 ------------------------------------------------------------------------------------------------- */
 
-func getTitle(m Model) string {
-	return m.sessionInfo.Meeting.Name
+func titleView(m Model) string {
+	return h1Style.Width(m.width - 4).Render(m.sessionInfo.Meeting.Name)
 }
 
-func getSubTitle(m Model) string {
+func subtitleView(m Model) string {
 	t := m.sessionInfo.Type
 
 	if m.sessionInfo.Type == "Race" {
 		t = fmt.Sprintf("%s: %d / %d Laps", t, m.lapCount.CurrentLap, m.lapCount.TotalLaps)
 	}
 
-	return t
+	return h2Style.Width(m.width - 4).Render(t)
+}
+
+func msgView(m Model, p string) string {
+	s := dialogBoxStyle
+	msg := m.lastSessionStatus
+	if m.lapCount.CurrentLap < m.lapCount.TotalLaps {
+		msg = m.lastTrackStatus
+	}
+
+	switch msg {
+	case "Ends":
+		msg = "🏁 Session has ended 🏁"
+		s.Border(lipgloss.BlockBorder())
+	case "SCDeployed":
+		msg = "Safety Car"
+		s = dialogBoxStyle.BorderForeground(yellow)
+	case "Yellow":
+		msg = "🟨 Yellow Flag 🟨"
+		s = dialogBoxStyle.BorderForeground(yellow)
+	case "DoubleYellow":
+		msg = "🟨 🟨 Double Yellow Flag 🟨 🟨"
+		s = dialogBoxStyle.BorderForeground(yellow)
+	case "AllClear":
+		msg = "🟩 Green Flag 🟩"
+		s = dialogBoxStyle.BorderForeground(green)
+	case "Red":
+		msg = "🟥 Red Flag 🟥"
+		s = dialogBoxStyle.BorderForeground(red)
+	}
+
+	msgBox := lipgloss.PlaceHorizontal(
+		m.width-4,
+		lipgloss.Center,
+		s.Width(m.width-10).Render(msg),
+		lipgloss.WithWhitespaceChars(".."),
+		lipgloss.WithWhitespaceForeground(subtle),
+	)
+
+	return lipgloss.JoinVertical(lipgloss.Top, p, p, msgBox, p, p)
+}
+
+func tableView(m Model, p string) string {
+	t := lipgloss.PlaceHorizontal(
+		m.width-4,
+		lipgloss.Center,
+		m.table.View(),
+		lipgloss.WithWhitespaceChars("."),
+		lipgloss.WithWhitespaceForeground(subtle),
+	)
+
+	return lipgloss.JoinVertical(lipgloss.Top, p, t, p)
+}
+
+func getDriver(m Model, driverNumber string) string {
+	nameStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(fmt.Sprintf("#%s", m.driverList[driverNumber].TeamColour))).
+		PaddingLeft(1)
+	name := nameStyle.Render(m.driverList[driverNumber].ShortName)
+
+	if m.fastestLapOwner == driverNumber {
+		return fmt.Sprintf("%s %s", name, stylePurple.Render("⏱"))
+	}
+
+	return name
 }
 
 func getInterval(m Model, driverNumber string) string {
@@ -258,24 +367,36 @@ func getInterval(m Model, driverNumber string) string {
 		interval = "DNF"
 	} else if m.timingData[driverNumber].IntervalToPositionAhead.Value != "" {
 		interval = m.timingData[driverNumber].IntervalToPositionAhead.Value
+
+		if m.timingData[driverNumber].IntervalToPositionAhead.Catching {
+			interval = styleGreen.Render(interval)
+		}
+	}
+	return interval
+}
+
+func getLeaderGap(m Model, driverNumber string) string {
+	interval := "-"
+	if m.timingData[driverNumber].Retired || m.timingData[driverNumber].Status == 4 {
+		interval = "DNF"
+	} else if m.timingData[driverNumber].GapToLeader != "" {
+		interval = m.timingData[driverNumber].GapToLeader
 	}
 	return interval
 }
 
 func getLastLap(m Model, driverNumber string) (string, bool, bool) {
-	var lastlap string
+	lastlap := "-"
 	pBest := m.timingData[driverNumber].LastLapTime.PersonalFastest
 	oBest := m.timingData[driverNumber].LastLapTime.OverallFastest
-	if m.timingData[driverNumber].Retired || m.timingData[driverNumber].Status == 4 {
-		lastlap = "-"
-		pBest = false
-		oBest = false
-	} else if m.timingData[driverNumber].LastLapTime.Value != "" {
+
+	if !m.timingData[driverNumber].Retired &&
+		m.timingData[driverNumber].Status != 4 &&
+		m.timingData[driverNumber].LastLapTime.Value != "" {
 		lastlap = m.timingData[driverNumber].LastLapTime.Value
 	}
 
 	return lastlap, pBest, oBest
-
 }
 
 /* Private Helper Functions
@@ -284,8 +405,9 @@ func getLastLap(m Model, driverNumber string) (string, bool, bool) {
 func newTable() table.Model {
 	return table.New([]table.Column{
 		table.NewColumn("position", "POS", 3),
-		table.NewColumn("driver", "DRIVER", 6),
+		table.NewColumn("driver", "DRIVER", 7).WithStyle(lipgloss.NewStyle().Align(lipgloss.Left)),
 		table.NewColumn("interval", "INT", 8),
+		table.NewColumn("leader", "LEADER", 8),
 		table.NewColumn("lastlap", "LAST", 10),
 	}).
 		WithRows([]table.Row{}).

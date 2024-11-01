@@ -108,6 +108,7 @@ func TestReferenceMessage(t *testing.T) {
 	d := make(chan error)
 	sessionInfoCh := make(chan SessionInfoEvent)
 	driverListCh := make(chan DriverListEvent)
+	sessionDataCh := make(chan SessionDataEvent)
 	referenceDataMsg, err := os.ReadFile("./testdata/reference-message.json")
 	if err != nil {
 		t.Error("unable to read static data required for test setup", err)
@@ -131,6 +132,7 @@ func TestReferenceMessage(t *testing.T) {
 		WithWSBaseURL(httpToWs(t, ts.URL)),
 		WithDriverListChannel(driverListCh),
 		WithSessionInfoChannel(sessionInfoCh),
+		WithSessionDataChannel(sessionDataCh),
 		WithLogger(testLogger{}),
 	)
 	c.Negotiate()
@@ -150,9 +152,12 @@ func TestReferenceMessage(t *testing.T) {
 		case e := <-driverListCh:
 			msgCount++
 			testDriverList(t, e)
+		case e := <-sessionDataCh:
+			msgCount++
+			testSessionData(t, e)
 		}
 		// Interrupt the client if we've processed all of the messages we need to process
-		if msgCount >= 2 && listening {
+		if msgCount >= 3 && listening {
 			close(i)
 		}
 	}
@@ -167,6 +172,7 @@ func TestChangeMessages(t *testing.T) {
 	sessionInfoCh := make(chan SessionInfoEvent)
 	racectrlMsgCh := make(chan RaceControlEvent)
 	weatherDataCh := make(chan WeatherDataEvent)
+	sessionDataCh := make(chan SessionDataEvent)
 	msgs := getAllMessages(t)
 
 	// start test server
@@ -196,6 +202,7 @@ func TestChangeMessages(t *testing.T) {
 		WithSessionInfoChannel(sessionInfoCh),
 		WithRaceControlChannel(racectrlMsgCh),
 		WithWeatherChannel(weatherDataCh),
+		WithSessionDataChannel(sessionDataCh),
 		WithLogger(testLogger{}),
 	)
 	c.Negotiate()
@@ -228,6 +235,9 @@ func TestChangeMessages(t *testing.T) {
 		case e := <-weatherDataCh:
 			msgCount++
 			testWeatherData(t, e)
+		case e := <-sessionDataCh:
+			msgCount++
+			testSessionData(t, e)
 		}
 		// Interrupt the client if we've processed all of the messages we need to process
 		if msgCount >= len(msgs) && listening {
@@ -293,9 +303,19 @@ func testRaceControlMessages(t *testing.T, e RaceControlEvent) {
 }
 
 func testWeatherData(t *testing.T, e WeatherDataEvent) {
-	if e.Data.AirTemp != "28.5" {
-		t.Errorf("incorrect AirTemp - expected '%s' but found '%s", "28.5", e.Data.AirTemp)
-	}
+	t.Run("WeatherData", func(t *testing.T) {
+		if e.Data.AirTemp != "28.5" {
+			t.Errorf("incorrect AirTemp - expected '%s' but found '%s", "28.5", e.Data.AirTemp)
+		}
+	})
+}
+
+func testSessionData(t *testing.T, e SessionDataEvent) {
+	t.Run("SessionData", func(t *testing.T) {
+		if e.Data.StatusSeries["1"].TrackStatus != "AllClear" {
+			t.Errorf("incorrect track status - expected '%s' but found '%s'", "AllClear", e.Data.StatusSeries["8"].TrackStatus)
+		}
+	})
 }
 
 func getAllMessages(t *testing.T) []string {
