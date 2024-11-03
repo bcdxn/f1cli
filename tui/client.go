@@ -27,6 +27,7 @@ type Model struct {
 	sessionInfo        f1livetiming.SessionInfo
 	driverList         map[string]f1livetiming.DriverData
 	timingData         map[string]f1livetiming.DriverTimingData
+	timingAppData      map[string]f1livetiming.DriverTimingAppData
 	bestLaps           map[string]string
 	lapCount           f1livetiming.LapCount
 	lastTrackStatus    string
@@ -62,6 +63,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return sessionDataMsgHandler(m, msg)
 	case RaceControlMsg:
 		return raceCtrlMsgHandler(m, msg)
+	case TimingAppDataMsg:
+		return timingAppDataMsgHandler(m, msg)
 	case UpdateTableMsg:
 		return updateTableMsgHandler(m, msg)
 	case DoneMsg:
@@ -161,6 +164,10 @@ type RaceControlMsg struct {
 	RaceControlMessage f1livetiming.RaceControlMessage
 }
 
+type TimingAppDataMsg struct {
+	TimingAppData map[string]f1livetiming.DriverTimingAppData
+}
+
 type UpdateTableMsg struct{}
 
 /* Tea Commands
@@ -224,22 +231,22 @@ func lapCountMsgHandler(m Model, msg LapCountMsg) (Model, tea.Cmd) {
 }
 
 func timingDataMsgHandler(m Model, msg TimingDataMsg) (Model, tea.Cmd) {
-	for key, newTiming := range msg.TimingData {
+	for key, new := range msg.TimingData {
 		// Store fasted lap if we have one
-		if newTiming.LastLapTime.OverallFastest {
+		if new.LastLapTime.OverallFastest {
 			m.fastestLapOwner = key
 		}
-		if newTiming.BestLapTime.Value != "" {
-			m.bestLaps[key] = newTiming.LastLapTime.Value
+		if new.BestLapTime.Value != "" {
+			m.bestLaps[key] = new.LastLapTime.Value
 		}
-		if newTiming.LastLapTime.PersonalFastest {
-			m.bestLaps[key] = newTiming.LastLapTime.Value
+		if new.LastLapTime.PersonalFastest {
+			m.bestLaps[key] = new.LastLapTime.Value
 		}
 		// Merge timing data delta with existing data
 		if oldTiming, ok := m.timingData[key]; ok {
-			mergo.Merge(&oldTiming, newTiming, mergo.WithOverride)
+			mergo.Merge(&oldTiming, new, mergo.WithOverride)
 		} else {
-			m.timingData[key] = newTiming
+			m.timingData[key] = new
 		}
 	}
 	return m, updateTableCmd()
@@ -272,6 +279,17 @@ func sessionDataMsgHandler(m Model, msg SessionDataMsg) (Model, tea.Cmd) {
 func raceCtrlMsgHandler(m Model, msg RaceControlMsg) (Model, tea.Cmd) {
 	m.lastRaceControlMsg = msg.RaceControlMessage
 	return m, nil
+}
+
+func timingAppDataMsgHandler(m Model, msg TimingAppDataMsg) (Model, tea.Cmd) {
+	for key, new := range msg.TimingAppData {
+		if old, ok := m.timingAppData[key]; ok {
+			mergo.Merge(&old, new, mergo.WithOverride)
+		} else {
+			m.timingAppData[key] = new
+		}
+	}
+	return m, updateTableCmd()
 }
 
 func updateTableMsgHandler(m Model, _ UpdateTableMsg) (Model, tea.Cmd) {

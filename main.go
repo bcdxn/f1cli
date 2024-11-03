@@ -20,6 +20,7 @@ func main() {
 	timingData := make(chan f1livetiming.TimingDataEvent)
 	sessionData := make(chan f1livetiming.SessionDataEvent)
 	raceControlMsg := make(chan f1livetiming.RaceControlEvent)
+	timingAppDataMsg := make(chan f1livetiming.TimingAppDataEvent)
 
 	p := tea.NewProgram(tui.NewModel(tuiLogger, i, d), tea.WithAltScreen())
 	f1 := f1livetiming.NewClient(
@@ -31,6 +32,7 @@ func main() {
 		f1livetiming.WithTimingDataChannel(timingData),
 		f1livetiming.WithSessionDataChannel(sessionData),
 		f1livetiming.WithRaceControlChannel(raceControlMsg),
+		f1livetiming.WithTimingAppDataChannel(timingAppDataMsg),
 		f1livetiming.WithLogger(f1Logger),
 	)
 
@@ -92,6 +94,11 @@ func main() {
 				f1Logger.Debug("received sessionData channel update")
 				p.Send(tui.RaceControlMsg{
 					RaceControlMessage: rcm.Data,
+				})
+			case tad := <-timingAppDataMsg:
+				f1Logger.Debug("received timingAppdataMsg channel update")
+				p.Send(tui.TimingAppDataMsg{
+					TimingAppData: tad.Data,
 				})
 			}
 		}
