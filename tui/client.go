@@ -308,7 +308,7 @@ func updateTableMsgHandler(m Model, _ UpdateTableMsg) (Model, tea.Cmd) {
 ------------------------------------------------------------------------------------------------- */
 
 func titleView(m Model) string {
-	style := styleH2
+	style := styleH1
 	return style.Width(m.width - 4).Render(m.sessionInfo.Meeting.Name)
 }
 
@@ -328,7 +328,7 @@ func subtitleView(m Model) string {
 		status = m.lastTrackStatus
 	}
 
-	var style lipgloss.Style
+	style := styleH2
 
 	switch status {
 	case "Ends":

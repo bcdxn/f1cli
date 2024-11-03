@@ -16,6 +16,7 @@ var (
 	styleH1     = lipgloss.NewStyle().
 			Align(lipgloss.Center).
 			Bold(true).
+			PaddingBottom(1).
 			Border(lipgloss.NormalBorder(), false, false, true, false)
 	styleH2 = lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false).
