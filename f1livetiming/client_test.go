@@ -109,6 +109,7 @@ func TestReferenceMessage(t *testing.T) {
 	sessionInfoCh := make(chan SessionInfoEvent)
 	driverListCh := make(chan DriverListEvent)
 	sessionDataCh := make(chan SessionDataEvent)
+	timingAppDataCh := make(chan TimingAppDataEvent)
 	referenceDataMsg, err := os.ReadFile("./testdata/reference-message.json")
 	if err != nil {
 		t.Error("unable to read static data required for test setup", err)
@@ -133,6 +134,7 @@ func TestReferenceMessage(t *testing.T) {
 		WithDriverListChannel(driverListCh),
 		WithSessionInfoChannel(sessionInfoCh),
 		WithSessionDataChannel(sessionDataCh),
+		WithTimingAppDataChannel(timingAppDataCh),
 		WithLogger(testLogger{}),
 	)
 	c.Negotiate()
@@ -155,9 +157,12 @@ func TestReferenceMessage(t *testing.T) {
 		case e := <-sessionDataCh:
 			msgCount++
 			testSessionData(t, e)
+		case e := <-timingAppDataCh:
+			msgCount++
+			testingTimingAppData(t, e)
 		}
 		// Interrupt the client if we've processed all of the messages we need to process
-		if msgCount >= 3 && listening {
+		if msgCount >= 4 && listening {
 			close(i)
 		}
 	}
@@ -314,6 +319,17 @@ func testSessionData(t *testing.T, e SessionDataEvent) {
 	t.Run("SessionData", func(t *testing.T) {
 		if e.Data.StatusSeries["1"].TrackStatus != "AllClear" {
 			t.Errorf("incorrect track status - expected '%s' but found '%s'", "AllClear", e.Data.StatusSeries["8"].TrackStatus)
+		}
+	})
+}
+
+func testingTimingAppData(t *testing.T, e TimingAppDataEvent) {
+	t.Run("TimingAppData", func(t *testing.T) {
+		if e.Data["20"].RacingNumber != "20" {
+			t.Errorf("incorrect RacingNumber - expected '%s' but found '%s'", "20", e.Data["20"].RacingNumber)
+		}
+		if e.Data["20"].Stints["0"].Compound != "SOFT" {
+			t.Errorf("incorrect Compound - expected '%s' but found '%s'", "SOFT", e.Data["20"].Stints["0"].Compound)
 		}
 	})
 }

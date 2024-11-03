@@ -131,12 +131,14 @@ type ReferenceTimingAppData struct {
 }
 
 type ChangeTimingAppData struct {
-	Lines map[string]struct {
-		RacingNumber string           `json:"RacingNumber"`
-		Line         int              `json:"Line"`
-		GridPos      string           `json:"GridPos"`
-		Stints       map[string]Stint `json:"Stints"`
-	} `json:"Lines"`
+	Lines map[string]DriverTimingAppData `json:"Lines"`
+}
+
+type DriverTimingAppData struct {
+	RacingNumber string           `json:"RacingNumber"`
+	Line         int              `json:"Line"`
+	GridPos      string           `json:"GridPos"`
+	Stints       map[string]Stint `json:"Stints"`
 }
 
 type Stint struct {

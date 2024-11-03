@@ -16,20 +16,21 @@ import (
 ------------------------------------------------------------------------------------------------- */
 
 type Client struct {
-	logger             Logger
-	Interrupt          chan struct{}
-	Done               chan error
-	DriverListChannel  chan DriverListEvent
-	LapCountChannel    chan LapCountEvent
-	RaceControlChannel chan RaceControlEvent
-	SessionDataChannel chan SessionDataEvent
-	SessionInfoChannel chan SessionInfoEvent
-	TimingDataChannel  chan TimingDataEvent
-	WeatherChannel     chan WeatherDataEvent
-	ConnectionToken    string
-	Cookie             string
-	HTTPBaseURL        string
-	WSBaseURL          string
+	logger               Logger
+	Interrupt            chan struct{}
+	Done                 chan error
+	DriverListChannel    chan DriverListEvent
+	LapCountChannel      chan LapCountEvent
+	RaceControlChannel   chan RaceControlEvent
+	SessionDataChannel   chan SessionDataEvent
+	SessionInfoChannel   chan SessionInfoEvent
+	TimingDataChannel    chan TimingDataEvent
+	TimingAppDataChannel chan TimingAppDataEvent
+	WeatherChannel       chan WeatherDataEvent
+	ConnectionToken      string
+	Cookie               string
+	HTTPBaseURL          string
+	WSBaseURL            string
 }
 
 // NewClient creates and returns a new F1 LiveTiming Client for retrieving real-time data from
@@ -251,6 +252,12 @@ func WithTimingDataChannel(timingDataEvents chan TimingDataEvent) ClientOption {
 	}
 }
 
+func WithTimingAppDataChannel(timingAppDataEvents chan TimingAppDataEvent) ClientOption {
+	return func(c *Client) {
+		c.TimingAppDataChannel = timingAppDataEvents
+	}
+}
+
 func WithSessionDataChannel(sessionDataEvents chan SessionDataEvent) ClientOption {
 	return func(c *Client) {
 		c.SessionDataChannel = sessionDataEvents
@@ -355,6 +362,7 @@ func (c *Client) processReferenceMessage(referenceMessage F1ReferenceMessage) {
 	c.writeToDriverListChannel(referenceMessage.Reference.DriverList)
 	c.writeToLapCountChannel(referenceMessage.Reference.LapCount)
 	c.writeToTimingDataChannel(referenceMessage.Reference.TimingData)
+	c.writeReferenceToTimingAppDataChannel(referenceMessage.Reference.TimingAppData)
 	c.writeReferenceToSessionDataChannel(referenceMessage.Reference.SessionData)
 	c.writeReferenceToRaceControlChannel(referenceMessage.Reference.RaceControlMessages)
 }
