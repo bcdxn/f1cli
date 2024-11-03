@@ -751,8 +751,8 @@
           "RacingNumber": "20",
           "Line": 8,
           "GridPos": "8",
-          "Stints": {
-            "3": {
+          "Stints": [
+            {
               "LapFlags": 0,
               "Compound": "SOFT",
               "New": "true",
@@ -760,7 +760,7 @@
               "TotalLaps": 0,
               "StartLaps": 0
             }
-          }
+          ]
         },
         "11": {
           "RacingNumber": "11",

@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"dario.cat/mergo"
 	"github.com/bcdxn/go-f1/f1livetiming"
@@ -26,10 +27,12 @@ type Model struct {
 	sessionInfo        f1livetiming.SessionInfo
 	driverList         map[string]f1livetiming.DriverData
 	timingData         map[string]f1livetiming.DriverTimingData
+	bestLaps           map[string]string
 	lapCount           f1livetiming.LapCount
 	lastTrackStatus    string
 	lastSessionStatus  string
 	latestSeriesStatus string
+	lastRaceControlMsg f1livetiming.RaceControlMessage
 	fastestLapOwner    string
 	table              table.Model
 }
@@ -57,6 +60,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return timingDataMsgHandler(m, msg)
 	case SessionDataMsg:
 		return sessionDataMsgHandler(m, msg)
+	case RaceControlMsg:
+		return raceCtrlMsgHandler(m, msg)
 	case UpdateTableMsg:
 		return updateTableMsgHandler(m, msg)
 	case DoneMsg:
@@ -86,19 +91,21 @@ func (m Model) View() string {
 			lipgloss.Center,
 			"",
 			lipgloss.WithWhitespaceChars("."),
-			lipgloss.WithWhitespaceForeground(subtle),
+			lipgloss.WithWhitespaceForeground(styleSubtle),
 		)
 
 		v = lipgloss.JoinVertical(
 			lipgloss.Top,
 			titleView(m),
-			msgView(m, padding),
+			padding,
+			padding,
 			subtitleView(m),
 			tableView(m, padding),
+			msgView(m, padding),
 		)
 	}
 
-	return docStyle.Width(m.width).Render(v)
+	return styleDoc.Width(m.width).Render(v)
 }
 
 // NewModel returns an instance of the tea Model needed to start the bubbletea client app
@@ -116,6 +123,7 @@ func NewModel(logger tealogger.Logger, interrupt chan struct{}, done chan error)
 		done:               done,
 		driverList:         make(map[string]f1livetiming.DriverData, 20),
 		timingData:         make(map[string]f1livetiming.DriverTimingData, 20),
+		bestLaps:           make(map[string]string, 20),
 		table:              newTable(),
 	}
 }
@@ -149,6 +157,10 @@ type SessionDataMsg struct {
 	SessionData f1livetiming.ChangeSessionData
 }
 
+type RaceControlMsg struct {
+	RaceControlMessage f1livetiming.RaceControlMessage
+}
+
 type UpdateTableMsg struct{}
 
 /* Tea Commands
@@ -180,7 +192,7 @@ func errMsgHandler(m Model, msg ErrorMsg) (Model, tea.Cmd) {
 }
 
 func windowSizeMsgHandler(m Model, msg tea.WindowSizeMsg) (Model, tea.Cmd) {
-	h, v := docStyle.GetFrameSize()
+	h, v := styleDoc.GetFrameSize()
 	m.width = msg.Width - h
 	m.height = msg.Height - v
 	return m, nil
@@ -217,6 +229,12 @@ func timingDataMsgHandler(m Model, msg TimingDataMsg) (Model, tea.Cmd) {
 		if newTiming.LastLapTime.OverallFastest {
 			m.fastestLapOwner = key
 		}
+		if newTiming.BestLapTime.Value != "" {
+			m.bestLaps[key] = newTiming.LastLapTime.Value
+		}
+		if newTiming.LastLapTime.PersonalFastest {
+			m.bestLaps[key] = newTiming.LastLapTime.Value
+		}
 		// Merge timing data delta with existing data
 		if oldTiming, ok := m.timingData[key]; ok {
 			mergo.Merge(&oldTiming, newTiming, mergo.WithOverride)
@@ -251,6 +269,11 @@ func sessionDataMsgHandler(m Model, msg SessionDataMsg) (Model, tea.Cmd) {
 	return m, updateTableCmd()
 }
 
+func raceCtrlMsgHandler(m Model, msg RaceControlMsg) (Model, tea.Cmd) {
+	m.lastRaceControlMsg = msg.RaceControlMessage
+	return m, nil
+}
+
 func updateTableMsgHandler(m Model, _ UpdateTableMsg) (Model, tea.Cmd) {
 	rows := make([]table.Row, 0, 20)
 	for driverNumber, data := range m.driverList {
@@ -271,6 +294,7 @@ func updateTableMsgHandler(m Model, _ UpdateTableMsg) (Model, tea.Cmd) {
 			"driver":   getDriver(m, driverNumber),
 			"interval": getInterval(m, driverNumber),
 			"leader":   getLeaderGap(m, driverNumber),
+			"bestlap":  m.bestLaps[driverNumber],
 			"lastlap":  table.NewStyledCell(lastlap, lastlapStyle),
 		}))
 	}
@@ -284,7 +308,8 @@ func updateTableMsgHandler(m Model, _ UpdateTableMsg) (Model, tea.Cmd) {
 ------------------------------------------------------------------------------------------------- */
 
 func titleView(m Model) string {
-	return h1Style.Width(m.width - 4).Render(m.sessionInfo.Meeting.Name)
+	style := styleH2
+	return style.Width(m.width - 4).Render(m.sessionInfo.Meeting.Name)
 }
 
 func subtitleView(m Model) string {
@@ -294,43 +319,88 @@ func subtitleView(m Model) string {
 		t = fmt.Sprintf("%s: %d / %d Laps", t, m.lapCount.CurrentLap, m.lapCount.TotalLaps)
 	}
 
-	return h2Style.Width(m.width - 4).Render(t)
+	status := m.lastSessionStatus
+	if m.lapCount.CurrentLap < m.lapCount.TotalLaps {
+		status = m.lastTrackStatus
+	}
+
+	if m.lapCount.CurrentLap < m.lapCount.TotalLaps {
+		status = m.lastTrackStatus
+	}
+
+	var style lipgloss.Style
+
+	switch status {
+	case "Ends":
+		status = "🏁 Session has ended 🏁"
+	case "SCDeployed":
+		status = "Safety Car"
+		style = styleH2.BorderForeground(yellow)
+	case "Yellow":
+		status = "🟨 Yellow Flag 🟨"
+		style = styleH2.BorderForeground(yellow)
+	case "DoubleYellow":
+		status = "🟨 🟨 Double Yellow Flag 🟨 🟨"
+		style = styleH2.BorderForeground(yellow)
+	case "AllClear":
+		status = "🟩 Green Flag 🟩"
+		style = styleH2.BorderForeground(green)
+	case "Red":
+		status = "🟥 Red Flag 🟥"
+		style = styleH2.BorderForeground(red)
+	}
+
+	return style.Width(m.width - 4).Render(fmt.Sprintf("%s %s", t, status))
 }
 
 func msgView(m Model, p string) string {
-	s := dialogBoxStyle
-	msg := m.lastSessionStatus
-	if m.lapCount.CurrentLap < m.lapCount.TotalLaps {
-		msg = m.lastTrackStatus
+	s := styleDialogBox
+	msg := m.lastRaceControlMsg.Message
+	if msg == "" {
+		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
 	}
 
-	switch msg {
-	case "Ends":
-		msg = "🏁 Session has ended 🏁"
-		s.Border(lipgloss.BlockBorder())
-	case "SCDeployed":
-		msg = "Safety Car"
-		s = dialogBoxStyle.BorderForeground(yellow)
-	case "Yellow":
-		msg = "🟨 Yellow Flag 🟨"
-		s = dialogBoxStyle.BorderForeground(yellow)
-	case "DoubleYellow":
-		msg = "🟨 🟨 Double Yellow Flag 🟨 🟨"
-		s = dialogBoxStyle.BorderForeground(yellow)
-	case "AllClear":
-		msg = "🟩 Green Flag 🟩"
-		s = dialogBoxStyle.BorderForeground(green)
-	case "Red":
-		msg = "🟥 Red Flag 🟥"
-		s = dialogBoxStyle.BorderForeground(red)
+	t, err := time.Parse("2006-01-02T15:04:05", m.lastRaceControlMsg.UTC)
+	if err != nil {
+		m.logger.Debug("unable to parse race control message time:", m.lastRaceControlMsg)
+		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
 	}
+	if time.Since(t).Seconds() > 15 {
+		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
+	}
+
+	switch m.lastRaceControlMsg.Category {
+	case "Flag":
+		switch m.lastRaceControlMsg.Flag {
+		case "DOUBLE YELLOW":
+			s.Foreground(yellow).BorderForeground(yellow)
+		case "YELLOW":
+			s.Foreground(yellow).BorderForeground(yellow)
+		case "CLEAR":
+			s.Foreground(green).BorderForeground(green)
+		case "RED":
+			s.Foreground(red).BorderForeground(red)
+		case "BLUE":
+			return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
+		case "CHEQUERED": // nothing special to do here
+		}
+	}
+
+	// investigation := regexp.MustCompile("UNDER INVESTIGATION")
+	// penalty := regexp.MustCompile("PENALTY FOR")
+
+	// if investigation.MatchString(msg) {
+	// 	s.Foreground(orange).BorderForeground(orange)
+	// } else if penalty.MatchString(msg) {
+	// 	s.Foreground(red).BorderForeground(red)
+	// }
 
 	msgBox := lipgloss.PlaceHorizontal(
 		m.width-4,
 		lipgloss.Center,
 		s.Width(m.width-10).Render(msg),
 		lipgloss.WithWhitespaceChars(".."),
-		lipgloss.WithWhitespaceForeground(subtle),
+		lipgloss.WithWhitespaceForeground(styleSubtle),
 	)
 
 	return lipgloss.JoinVertical(lipgloss.Top, p, p, msgBox, p, p)
@@ -342,7 +412,7 @@ func tableView(m Model, p string) string {
 		lipgloss.Center,
 		m.table.View(),
 		lipgloss.WithWhitespaceChars("."),
-		lipgloss.WithWhitespaceForeground(subtle),
+		lipgloss.WithWhitespaceForeground(styleSubtle),
 	)
 
 	return lipgloss.JoinVertical(lipgloss.Top, p, t, p)
@@ -371,6 +441,8 @@ func getInterval(m Model, driverNumber string) string {
 		if m.timingData[driverNumber].IntervalToPositionAhead.Catching {
 			interval = styleGreen.Render(interval)
 		}
+	} else if m.timingData[driverNumber].TimeDiffToPositionAhead != "" {
+		interval = m.timingData[driverNumber].TimeDiffToPositionAhead
 	}
 	return interval
 }
@@ -381,6 +453,8 @@ func getLeaderGap(m Model, driverNumber string) string {
 		interval = "DNF"
 	} else if m.timingData[driverNumber].GapToLeader != "" {
 		interval = m.timingData[driverNumber].GapToLeader
+	} else if m.timingData[driverNumber].TimeDiffToFastest != "" {
+		interval = m.timingData[driverNumber].TimeDiffToFastest
 	}
 	return interval
 }
@@ -408,6 +482,7 @@ func newTable() table.Model {
 		table.NewColumn("driver", "DRIVER", 7).WithStyle(lipgloss.NewStyle().Align(lipgloss.Left)),
 		table.NewColumn("interval", "INT", 8),
 		table.NewColumn("leader", "LEADER", 8),
+		table.NewColumn("bestlap", "BEST", 10),
 		table.NewColumn("lastlap", "LAST", 10),
 	}).
 		WithRows([]table.Row{}).

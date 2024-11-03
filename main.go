@@ -19,6 +19,7 @@ func main() {
 	lapCount := make(chan f1livetiming.LapCountEvent)
 	timingData := make(chan f1livetiming.TimingDataEvent)
 	sessionData := make(chan f1livetiming.SessionDataEvent)
+	raceControlMsg := make(chan f1livetiming.RaceControlEvent)
 
 	p := tea.NewProgram(tui.NewModel(tuiLogger, i, d), tea.WithAltScreen())
 	f1 := f1livetiming.NewClient(
@@ -29,6 +30,7 @@ func main() {
 		f1livetiming.WithLapCountChannel(lapCount),
 		f1livetiming.WithTimingDataChannel(timingData),
 		f1livetiming.WithSessionDataChannel(sessionData),
+		f1livetiming.WithRaceControlChannel(raceControlMsg),
 		f1livetiming.WithLogger(f1Logger),
 	)
 
@@ -63,33 +65,33 @@ func main() {
 				p.Send(tui.DoneMsg{})
 			case si := <-sessionInfo:
 				f1Logger.Debug("received sessionInfo channel update")
-				tuiLogger.Debug("sending tui.SessionInfoMsg")
 				p.Send(tui.SessionInfoMsg{
 					SessionInfo: si.Data,
 				})
 			case dl := <-driverList:
 				f1Logger.Debug("received driverList channel update")
-				tuiLogger.Debug("sending tui.DriverListMsg")
 				p.Send(tui.DriverListMsg{
 					DriverList: dl.Data,
 				})
 			case lc := <-lapCount:
 				f1Logger.Debug("recevied lapCount channel update")
-				tuiLogger.Debug("sending tui.LapCountMsg")
 				p.Send(tui.LapCountMsg{
 					LapCount: lc.Data,
 				})
 			case td := <-timingData:
 				f1Logger.Debug("recevied timingData channel update")
-				tuiLogger.Debug("sending tui.TimingDataMsg")
 				p.Send(tui.TimingDataMsg{
 					TimingData: td.Data.Lines,
 				})
 			case sd := <-sessionData:
 				f1Logger.Debug("received sessionData channel update")
-				tuiLogger.Debug("sending tui.SessionDataMsg")
 				p.Send(tui.SessionDataMsg{
 					SessionData: sd.Data,
+				})
+			case rcm := <-raceControlMsg:
+				f1Logger.Debug("received sessionData channel update")
+				p.Send(tui.RaceControlMsg{
+					RaceControlMessage: rcm.Data,
 				})
 			}
 		}

@@ -4,22 +4,20 @@ import "time"
 
 type F1ReferenceMessage struct {
 	Reference struct {
-		Heartbeat           HeartBeat             `json:"Heartbeat"`
-		CarDataZ            string                `json:"CarData.z"`
-		PositionDataZ       string                `json:"Position.z"`
-		ExtrapolatedClock   ExtrapolatedClock     `json:"ExtrapolatedClock"`
-		TopThree            TopThree              `json:"TopThree"`
-		TimingStats         TimingStats           `json:"TimingStats"`
-		TimingAppData       TimingAppData         `json:"TimingAppData"`
-		WeatherData         WeatherData           `json:"WeatherData"`
-		DriverList          map[string]DriverData `json:"DriverList"`
-		RaceControlMessages struct {
-			Messages []RaceControlMessage `json:"Messages"`
-		} `json:"RaceControlMessages"`
-		SessionInfo SessionInfo          `json:"SessionInfo"`
-		SessionData ReferenceSessionData `json:"SessionData"`
-		TimingData  TimingData           `json:"TimingData"`
-		LapCount    LapCount             `json:"LapCount"`
+		Heartbeat           HeartBeat              `json:"Heartbeat"`
+		CarDataZ            string                 `json:"CarData.z"`
+		PositionDataZ       string                 `json:"Position.z"`
+		ExtrapolatedClock   ExtrapolatedClock      `json:"ExtrapolatedClock"`
+		TopThree            TopThree               `json:"TopThree"`
+		TimingStats         TimingStats            `json:"TimingStats"`
+		TimingAppData       ReferenceTimingAppData `json:"TimingAppData"`
+		WeatherData         WeatherData            `json:"WeatherData"`
+		DriverList          map[string]DriverData  `json:"DriverList"`
+		RaceControlMessages RaceControlMessages    `json:"RaceControlMessages"`
+		SessionInfo         SessionInfo            `json:"SessionInfo"`
+		SessionData         ReferenceSessionData   `json:"SessionData"`
+		TimingData          TimingData             `json:"TimingData"`
+		LapCount            LapCount               `json:"LapCount"`
 	} `json:"R"`
 	MessageInterval string `json:"I"`
 }
@@ -123,12 +121,21 @@ type TimingStats struct {
 	} `json:"Lines"`
 }
 
-type TimingAppData struct {
+type ReferenceTimingAppData struct {
 	Lines map[string]struct {
 		RacingNumber string  `json:"RacingNumber"`
 		Line         int     `json:"Line"`
 		GridPos      string  `json:"GridPos"`
 		Stints       []Stint `json:"Stints"`
+	} `json:"Lines"`
+}
+
+type ChangeTimingAppData struct {
+	Lines map[string]struct {
+		RacingNumber string           `json:"RacingNumber"`
+		Line         int              `json:"Line"`
+		GridPos      string           `json:"GridPos"`
+		Stints       map[string]Stint `json:"Stints"`
 	} `json:"Lines"`
 }
 
@@ -173,12 +180,16 @@ type DriverData struct {
 	HeadshotURL   string `json:"HeadshotUrl"`
 }
 
-type RaceControlMessages struct {
+type RaceControlMessagesMap struct {
 	Messages map[string]RaceControlMessage `json:"Messages"`
 }
 
+type RaceControlMessages struct {
+	Messages []RaceControlMessage `json:"Messages"`
+}
+
 type RaceControlMessage struct {
-	Utc      string `json:"Utc"`
+	UTC      string `json:"Utc"`
 	Lap      uint8  `json:"Lap"`
 	Category string `json:"Category"`
 	Message  string `json:"Message"`

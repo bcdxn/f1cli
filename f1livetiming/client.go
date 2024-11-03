@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 
 	"golang.org/x/net/websocket"
 )
@@ -174,13 +175,16 @@ func (c *Client) Connect() {
 				continue
 			}
 			// Next try to parse a reference data message
+			referenceMsg := regexp.MustCompile(`,\s*"_kf":\s*(?:true|false)`).ReplaceAllString(msg, "")
 			var referenceData F1ReferenceMessage
-			err = json.Unmarshal([]byte(msg), &referenceData)
+			err = json.Unmarshal([]byte(referenceMsg), &referenceData)
 			if err == nil && referenceData.MessageInterval != "" {
 				c.logger.Debug("received reference data message")
 				c.processReferenceMessage(referenceData)
+				continue
 			}
-			c.logger.Debug("done processing message")
+			c.logger.Error("failed to processing message", err)
+			c.logger.Error("failed to processing message", msg)
 		}
 	}()
 
@@ -352,6 +356,7 @@ func (c *Client) processReferenceMessage(referenceMessage F1ReferenceMessage) {
 	c.writeToLapCountChannel(referenceMessage.Reference.LapCount)
 	c.writeToTimingDataChannel(referenceMessage.Reference.TimingData)
 	c.writeReferenceToSessionDataChannel(referenceMessage.Reference.SessionData)
+	c.writeReferenceToRaceControlChannel(referenceMessage.Reference.RaceControlMessages)
 }
 
 func (c *Client) processChangeMessage(changeMessage F1ChangeMessage) {
@@ -363,7 +368,7 @@ func (c *Client) processChangeMessage(changeMessage F1ChangeMessage) {
 			case "WeatherData":
 				c.writeToWeatherChannel(msgData)
 			case "RaceControlMessages":
-				c.writeToRaceControlChannel(msgData)
+				c.writeChangeToRaceControlChannel(msgData)
 			case "SessionInfo":
 				c.writeToSessionInfoChannel(msgData)
 			case "DriverList":
