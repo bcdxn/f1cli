@@ -35,6 +35,7 @@ type Model struct {
 	latestSeriesStatus string
 	lastRaceControlMsg f1livetiming.RaceControlMessage
 	fastestLapOwner    string
+	fastestLap         string
 	table              table.Model
 }
 
@@ -127,6 +128,7 @@ func NewModel(logger tealogger.Logger, interrupt chan struct{}, done chan error)
 		driverList:         make(map[string]f1livetiming.DriverData, 20),
 		timingData:         make(map[string]f1livetiming.DriverTimingData, 20),
 		bestLaps:           make(map[string]string, 20),
+		timingAppData:      make(map[string]f1livetiming.DriverTimingAppData),
 		table:              newTable(),
 	}
 }
@@ -235,9 +237,14 @@ func timingDataMsgHandler(m Model, msg TimingDataMsg) (Model, tea.Cmd) {
 		// Store fasted lap if we have one
 		if new.LastLapTime.OverallFastest {
 			m.fastestLapOwner = key
+			m.fastestLap = new.LastLapTime.Value
 		}
 		if new.BestLapTime.Value != "" {
-			m.bestLaps[key] = new.LastLapTime.Value
+			m.bestLaps[key] = new.BestLapTime.Value
+			if m.fastestLap == "" || new.BestLapTime.Value < m.fastestLap {
+				m.fastestLap = new.BestLapTime.Value
+				m.fastestLapOwner = key
+			}
 		}
 		if new.LastLapTime.PersonalFastest {
 			m.bestLaps[key] = new.LastLapTime.Value
@@ -312,6 +319,7 @@ func updateTableMsgHandler(m Model, _ UpdateTableMsg) (Model, tea.Cmd) {
 			"driver":   getDriver(m, driverNumber),
 			"interval": getInterval(m, driverNumber),
 			"leader":   getLeaderGap(m, driverNumber),
+			"tyre":     getTyre(m, driverNumber),
 			"bestlap":  m.bestLaps[driverNumber],
 			"lastlap":  table.NewStyledCell(lastlap, lastlapStyle),
 		}))
@@ -331,10 +339,9 @@ func titleView(m Model) string {
 }
 
 func subtitleView(m Model) string {
-	t := m.sessionInfo.Type
-
+	t := m.sessionInfo.Name
 	if m.sessionInfo.Type == "Race" {
-		t = fmt.Sprintf("%s: %d / %d Laps", t, m.lapCount.CurrentLap, m.lapCount.TotalLaps)
+		t = fmt.Sprintf("%d / %d Laps", m.lapCount.CurrentLap, m.lapCount.TotalLaps)
 	}
 
 	status := m.lastSessionStatus
@@ -350,21 +357,35 @@ func subtitleView(m Model) string {
 
 	switch status {
 	case "Ends":
-		status = "🏁 Session has ended 🏁"
+		fallthrough
+	case "Finished":
+		fallthrough
+	case "Finalised":
+		t = ""
+		status = fmt.Sprintf("%s has ended", m.sessionInfo.Name)
 	case "SCDeployed":
+		fallthrough
+	case "SCEnding":
 		status = "Safety Car"
 		style = styleH2.BorderForeground(yellow)
+	case "VSCDeployed":
+	case "VSCEnding":
+		status = "Virtual Safety Car"
+		style = styleH2.BorderForeground(yellow)
 	case "Yellow":
-		status = "🟨 Yellow Flag 🟨"
+		status = "Yellow Flag"
 		style = styleH2.BorderForeground(yellow)
 	case "DoubleYellow":
-		status = "🟨 🟨 Double Yellow Flag 🟨 🟨"
+		status = "Double Yellow Flag"
 		style = styleH2.BorderForeground(yellow)
 	case "AllClear":
-		status = "🟩 Green Flag 🟩"
+		status = ""
 		style = styleH2.BorderForeground(green)
 	case "Red":
-		status = "🟥 Red Flag 🟥"
+		status = "Red Flag"
+		style = styleH2.BorderForeground(red)
+	case "Aborted":
+		status = "Aborted Start"
 		style = styleH2.BorderForeground(red)
 	}
 
@@ -479,16 +500,47 @@ func getLeaderGap(m Model, driverNumber string) string {
 
 func getLastLap(m Model, driverNumber string) (string, bool, bool) {
 	lastlap := "-"
+
+	if m.timingData[driverNumber].Retired || m.timingData[driverNumber].Status == 4 {
+		return lastlap, false, false
+	}
+
 	pBest := m.timingData[driverNumber].LastLapTime.PersonalFastest
 	oBest := m.timingData[driverNumber].LastLapTime.OverallFastest
 
-	if !m.timingData[driverNumber].Retired &&
-		m.timingData[driverNumber].Status != 4 &&
-		m.timingData[driverNumber].LastLapTime.Value != "" {
+	if m.timingData[driverNumber].LastLapTime.Value != "" {
 		lastlap = m.timingData[driverNumber].LastLapTime.Value
 	}
 
 	return lastlap, pBest, oBest
+}
+
+func getTyre(m Model, driverNumber string) string {
+	if m.timingData[driverNumber].Retired || m.timingData[driverNumber].Status == 4 {
+		return "DNF"
+	}
+
+	l := len(m.timingAppData[driverNumber].Stints)
+	s := m.timingAppData[driverNumber].Stints[strconv.Itoa(l-1)]
+	c := s.Compound
+	style := lipgloss.NewStyle()
+
+	switch c {
+	case "SOFT":
+		c = style.Foreground(soft).Render("S")
+	case "MEDIUM":
+		c = style.Foreground(medium).Render("M")
+	case "HARD":
+		c = style.Foreground(hard).Render("H")
+	case "INTERMEDIATE":
+		c = style.Foreground(intermediate).Render("I")
+	case "WET":
+		c = style.Foreground(wet).Render("W")
+	default:
+		c = style.Render("-")
+	}
+
+	return fmt.Sprintf("%s %d laps", c, s.TotalLaps)
 }
 
 /* Private Helper Functions
@@ -500,6 +552,7 @@ func newTable() table.Model {
 		table.NewColumn("driver", "DRIVER", 7).WithStyle(lipgloss.NewStyle().Align(lipgloss.Left)),
 		table.NewColumn("interval", "INT", 8),
 		table.NewColumn("leader", "LEADER", 8),
+		table.NewColumn("tyre", "TYRE", 9),
 		table.NewColumn("bestlap", "BEST", 10),
 		table.NewColumn("lastlap", "LAST", 10),
 	}).

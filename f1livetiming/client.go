@@ -350,7 +350,7 @@ func sendSubscribe(sock *websocket.Conn) error {
 				"LapCount",
 				"TimingData"
 			]],
-			"I": 5
+			"I": 1
 		}
 	`)
 }
@@ -387,6 +387,8 @@ func (c *Client) processChangeMessage(changeMessage F1ChangeMessage) {
 				c.writeToTimingDataChannel(msgData)
 			case "SessionData":
 				c.writeChangeToSessionDataChannel(msgData)
+			case "TimingAppData":
+				c.writeChangetoTimingAppDataChannel(msgData)
 			default:
 				c.logger.Debug("unknown change message type:", msgData)
 			}
