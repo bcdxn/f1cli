@@ -196,6 +196,7 @@ type RaceControlMessage struct {
 	Category string `json:"Category"`
 	Message  string `json:"Message"`
 	Flag     string `json:"Flag"`
+	Mode     string `json:"Mode"`
 	Scope    string `json:"Scope"`
 	Status   string `json:"Status"`
 	Sector   uint8  `json:"Sector"`
@@ -273,18 +274,8 @@ type DriverTimingData struct {
 		Value    string `json:"Value"`
 		Catching bool   `json:"Catching"`
 	} `json:"IntervalToPositionAhead"`
-	Sectors []struct {
-		Stopped         bool   `json:"Stopped"`
-		Value           string `json:"Value"`
-		Status          int    `json:"Status"`
-		OverallFastest  bool   `json:"OverallFastest"`
-		PersonalFastest bool   `json:"PersonalFastest"`
-		Segments        []struct {
-			Status int `json:"Status"`
-		} `json:"Segments"`
-		PreviousValue string `json:"PreviousValue"`
-	} `json:"Sectors"`
-	Speeds struct {
+	Sectors []SectorTiming `json:"Sectors"`
+	Speeds  struct {
 		I1 struct {
 			Value           string `json:"Value"`
 			Status          int    `json:"Status"`
@@ -321,6 +312,18 @@ type DriverTimingData struct {
 		PersonalFastest bool   `json:"PersonalFastest"`
 	} `json:"LastLapTime"`
 	NumberOfLaps int `json:"NumberOfLaps"`
+}
+
+type SectorTiming struct {
+	Stopped         bool   `json:"Stopped"`
+	Value           string `json:"Value"`
+	Status          int    `json:"Status"`
+	OverallFastest  bool   `json:"OverallFastest"`
+	PersonalFastest bool   `json:"PersonalFastest"`
+	Segments        []struct {
+		Status int `json:"Status"`
+	} `json:"Segments"`
+	PreviousValue string `json:"PreviousValue"`
 }
 
 type LapCount struct {

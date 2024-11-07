@@ -3,8 +3,9 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 const (
-	red          = lipgloss.Color("#CF040E")
-	yellow       = lipgloss.Color("#A9B02B")
+	red = lipgloss.Color("#CF040E")
+	// yellow       = lipgloss.Color("#A9B02B")
+	yellow       = lipgloss.Color("#FAD105")
 	green        = lipgloss.Color("#17C81D")
 	purple       = lipgloss.Color("#DA0ED3")
 	orange       = lipgloss.Color("#F77C14")
@@ -13,12 +14,9 @@ const (
 	hard         = lipgloss.Color("#D4DFE8")
 	medium       = lipgloss.Color("#E4E344")
 	soft         = lipgloss.Color("#FA5A55")
-	// wet          = "🔵"
-	// intermediate = "🟢"
-	// hard         = "🔴"
-	// medium       = "🟡"
-	// soft         = "🔴"
-	// unknown      = "🟢"
+	fiaBlue      = lipgloss.Color("#0B203B")
+	light        = lipgloss.Color("#D1D4DD")
+	dark         = lipgloss.Color("#383838")
 )
 
 var (
@@ -43,4 +41,13 @@ var (
 			BorderRight(true).
 			BorderBottom(true).
 			Align(lipgloss.Center)
+	msgCategoryStyle = lipgloss.NewStyle().
+				Padding(1, 2).
+				Bold(true).
+				AlignVertical(lipgloss.Center)
+	msgStyle = lipgloss.NewStyle().
+			Background(light).
+			Padding(1, 2).
+			Foreground(dark).
+			AlignVertical(lipgloss.Center)
 )

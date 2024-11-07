@@ -5,6 +5,8 @@
 
 _Formula 1 in your terminal_
 
+![sc](readme-assets/screenshot.png)
+
 
 ## F1 LiveTiming API
 

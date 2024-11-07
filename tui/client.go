@@ -2,8 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
-	"time"
+	"strings"
 
 	"dario.cat/mergo"
 	"github.com/bcdxn/go-f1/f1livetiming"
@@ -302,26 +303,17 @@ func timingAppDataMsgHandler(m Model, msg TimingAppDataMsg) (Model, tea.Cmd) {
 func updateTableMsgHandler(m Model, _ UpdateTableMsg) (Model, tea.Cmd) {
 	rows := make([]table.Row, 0, 20)
 	for driverNumber, data := range m.driverList {
-		lastlap, pBest, oBest := getLastLap(m, driverNumber)
-
-		lastlapStyle := styleYellow
-
-		if lastlap == "-" {
-			lastlapStyle = lipgloss.NewStyle()
-		} else if oBest {
-			lastlapStyle = stylePurple
-		} else if pBest {
-			lastlapStyle = styleGreen
-		}
+		interval, isDNF := getInterval(m, driverNumber)
 
 		rows = append(rows, table.NewRow(table.RowData{
 			"position": data.Line,
 			"driver":   getDriver(m, driverNumber),
-			"interval": getInterval(m, driverNumber),
-			"leader":   getLeaderGap(m, driverNumber),
-			"tyre":     getTyre(m, driverNumber),
-			"bestlap":  m.bestLaps[driverNumber],
-			"lastlap":  table.NewStyledCell(lastlap, lastlapStyle),
+			"interval": interval,
+			"leader":   getLeaderGap(m, driverNumber, isDNF),
+			"tyre":     getTyre(m, driverNumber, isDNF),
+			"lastlap":  getLastLap(m, driverNumber, isDNF),
+			"sectors":  getSectors(m, driverNumber, isDNF),
+			"bestlap":  getBaseLap(m, driverNumber),
 		}))
 	}
 
@@ -393,43 +385,131 @@ func subtitleView(m Model) string {
 }
 
 func msgView(m Model, p string) string {
-	s := styleDialogBox
+	m.lastRaceControlMsg = f1livetiming.RaceControlMessage{
+		UTC:      "2024-10-27T20:24:35",
+		Lap:      13,
+		Category: "Other",
+		Message:  "FIA STEWARDS: TURN 4 INCIDENT INVOLVING CAR 1 (VER) UNDER INVESTIGATION - FORCING ANOTHER DRIVER OFF THE TRACK",
+	}
+	// m.lastRaceControlMsg = f1livetiming.RaceControlMessage{
+	// 	UTC:      "2024-10-27T20:24:35",
+	// 	Lap:      13,
+	// 	Category: "Other",
+	// 	Message:  "CAR 81 (PIA) TIME 1:22.312 DELETED - TRACK LIMITS AT TURN 2 LAP 38 14:59:43",
+	// }
+	// m.lastRaceControlMsg = f1livetiming.RaceControlMessage{
+	// 	UTC:      "2024-10-27T20:24:35",
+	// 	Lap:      13,
+	// 	Category: "Flag",
+	// 	Flag:     "DOUBLE YELLOW",
+	// 	Message:  "DOUBLE YELLOW IN SECTOR asdfkja ;sdfkaj d;flakjsf ;alsdkfj a;sdlfj as;dlfkjasd ;flkjas d;flaksjd f;laksdjf a;dlskfj a;sdlkfj a;sdlfkj as;dlfj as;dlfjk a;sdfk jas;dlfkj as;dlfk jas;dfkljas;ldf kjas;dlkfj a;sdlfkj a;lsdfj a;sdlfkj as;dlfjk as;dlfkj a;sdlfj as;dlf jas;ldfj ",
+	// }
+	// m.lastRaceControlMsg = f1livetiming.RaceControlMessage{
+	// 	UTC:      "2024-10-27T20:24:35",
+	// 	Lap:      13,
+	// 	Category: "Flag",
+	// 	Flag:     "CLEAR",
+	// 	Message:  "TRACK IS ALL CLEAR",
+	// }
+	// m.lastRaceControlMsg = f1livetiming.RaceControlMessage{
+	// 	UTC:      "2024-10-27T20:04:31",
+	// 	Lap:      1,
+	// 	Category: "SafetyCar",
+	// 	Status:   "DEPLOYED",
+	// 	Mode:     "SAFETY CAR",
+	// 	Message:  "SAFETY CAR DEPLOYED",
+	// }
+	// s := styleDialogBox
 	msg := m.lastRaceControlMsg.Message
 	if msg == "" {
 		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
 	}
 
-	t, err := time.Parse("2006-01-02T15:04:05", m.lastRaceControlMsg.UTC)
-	if err != nil {
-		m.logger.Debug("unable to parse race control message time:", m.lastRaceControlMsg)
-		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
-	}
-	if time.Since(t).Seconds() > 15 {
-		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
-	}
+	// t, err := time.Parse("2006-01-02T15:04:05", m.lastRaceControlMsg.UTC)
+	// if err != nil {
+	// 	m.logger.Debug("unable to parse race control message time:", m.lastRaceControlMsg)
+	// 	return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
+	// }
+	// if time.Since(t).Seconds() > 15 {
+	// 	return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
+	// }
+
+	cStyle := msgCategoryStyle
+	category := ""
+	mStyle := msgStyle.Width(60)
+	cStyle = cStyle.Height(msgStyle.GetHeight())
 
 	switch m.lastRaceControlMsg.Category {
 	case "Flag":
 		switch m.lastRaceControlMsg.Flag {
-		case "DOUBLE YELLOW":
-			s.Foreground(yellow).BorderForeground(yellow)
 		case "YELLOW":
-			s.Foreground(yellow).BorderForeground(yellow)
+			fallthrough
+		case "DOUBLE YELLOW":
+			category = strings.Join(strings.Split(m.lastRaceControlMsg.Flag, " "), "\n")
+			cStyle = cStyle.Background(yellow).Foreground(dark)
 		case "CLEAR":
-			s.Foreground(green).BorderForeground(green)
+			category = "ALL\nCLEAR"
+			cStyle = cStyle.Background(green).Foreground(light)
 		case "RED":
-			s.Foreground(red).BorderForeground(red)
+			category = strings.Join(strings.Split(m.lastRaceControlMsg.Flag, " "), "\n")
+			cStyle = cStyle.Background(red).Foreground(dark)
 		case "BLUE":
 			return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
-		case "CHEQUERED": // nothing special to do here
+		case "CHEQUERED":
 		}
+	case "SafetyCar":
+		category = strings.Join(strings.Split(m.lastRaceControlMsg.Mode, " "), "\n")
+		cStyle = cStyle.Background(yellow).Foreground(dark)
+	case "Other":
+		cStyle = cStyle.Background(fiaBlue).Foreground(light)
+		category = "RACE\nCONTROL"
+		fia := regexp.MustCompile("FIA STEWARDS: ")
+		investigation := regexp.MustCompile("UNDER INVESTIGATION")
+		penalty := regexp.MustCompile("PENALTY FOR")
+
+		if fia.MatchString(msg) || investigation.MatchString(msg) || penalty.MatchString(msg) {
+			category = "FIA"
+		}
+
+		msg = fia.ReplaceAllString(msg, "")
 	}
 
-	// investigation := regexp.MustCompile("UNDER INVESTIGATION")
-	// penalty := regexp.MustCompile("PENALTY FOR")
+	// .Background(lipgloss.Color("#0b203b")).Foreground(lipgloss.Color("#d1d4dd"))
+
+	// switch m.lastRaceControlMsg.Category {
+	// case "Flag":
+	// 	switch m.lastRaceControlMsg.Flag {
+	// 	case "DOUBLE YELLOW":
+	// 		s.Foreground(yellow).BorderForeground(yellow)
+	// 	case "YELLOW":
+	// 		s.Foreground(yellow).BorderForeground(yellow)
+	// 	case "CLEAR":
+	// 		s.Foreground(green).BorderForeground(green)
+	// 	case "RED":
+	// 		s.Foreground(red).BorderForeground(red)
+	// 	case "BLUE":
+	// 		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
+	// 	case "CHEQUERED": // nothing special to do here
+	// 	}
+	// }
 
 	// if investigation.MatchString(msg) {
-	// 	s.Foreground(orange).BorderForeground(orange)
+	// s = s.Foreground(orange).BorderForeground(orange)
+	renderedCat := cStyle.Render(category)
+	renderedMsg := mStyle.Render(msg)
+
+	if lipgloss.Height(renderedCat) > lipgloss.Height(renderedMsg) {
+		renderedMsg = mStyle.Height(lipgloss.Height(renderedCat)).Render(msg)
+	} else {
+		renderedCat = cStyle.Height(lipgloss.Height(renderedMsg)).Render(category)
+	}
+
+	test := lipgloss.JoinHorizontal(
+		lipgloss.Center,
+		renderedCat,
+		renderedMsg,
+	)
+	// 	fia.ReplaceAllString(msg, "")
 	// } else if penalty.MatchString(msg) {
 	// 	s.Foreground(red).BorderForeground(red)
 	// }
@@ -437,7 +517,8 @@ func msgView(m Model, p string) string {
 	msgBox := lipgloss.PlaceHorizontal(
 		m.width-4,
 		lipgloss.Center,
-		s.Width(m.width-10).Render(msg),
+		// s.Width(m.width-10).Render(msg),
+		test,
 		lipgloss.WithWhitespaceChars(".."),
 		lipgloss.WithWhitespaceForeground(styleSubtle),
 	)
@@ -470,10 +551,12 @@ func getDriver(m Model, driverNumber string) string {
 	return name
 }
 
-func getInterval(m Model, driverNumber string) string {
+func getInterval(m Model, driverNumber string) (string, bool) {
+	isDNF := false
 	interval := "-"
 	if m.timingData[driverNumber].Retired || m.timingData[driverNumber].Status == 4 {
 		interval = "DNF"
+		isDNF = true
 	} else if m.timingData[driverNumber].IntervalToPositionAhead.Value != "" {
 		interval = m.timingData[driverNumber].IntervalToPositionAhead.Value
 
@@ -483,13 +566,13 @@ func getInterval(m Model, driverNumber string) string {
 	} else if m.timingData[driverNumber].TimeDiffToPositionAhead != "" {
 		interval = m.timingData[driverNumber].TimeDiffToPositionAhead
 	}
-	return interval
+	return interval, isDNF
 }
 
-func getLeaderGap(m Model, driverNumber string) string {
+func getLeaderGap(m Model, driverNumber string, isDNF bool) string {
 	interval := "-"
-	if m.timingData[driverNumber].Retired || m.timingData[driverNumber].Status == 4 {
-		interval = "DNF"
+	if isDNF {
+		interval = "-"
 	} else if m.timingData[driverNumber].GapToLeader != "" {
 		interval = m.timingData[driverNumber].GapToLeader
 	} else if m.timingData[driverNumber].TimeDiffToFastest != "" {
@@ -498,26 +581,30 @@ func getLeaderGap(m Model, driverNumber string) string {
 	return interval
 }
 
-func getLastLap(m Model, driverNumber string) (string, bool, bool) {
+func getLastLap(m Model, driverNumber string, isDNF bool) string {
 	lastlap := "-"
 
-	if m.timingData[driverNumber].Retired || m.timingData[driverNumber].Status == 4 {
-		return lastlap, false, false
+	if isDNF {
+		return lastlap
 	}
-
-	pBest := m.timingData[driverNumber].LastLapTime.PersonalFastest
-	oBest := m.timingData[driverNumber].LastLapTime.OverallFastest
 
 	if m.timingData[driverNumber].LastLapTime.Value != "" {
 		lastlap = m.timingData[driverNumber].LastLapTime.Value
 	}
 
-	return lastlap, pBest, oBest
+	lastlapStyle := styleYellow
+	if m.timingData[driverNumber].LastLapTime.OverallFastest {
+		lastlapStyle = stylePurple
+	} else if m.timingData[driverNumber].LastLapTime.PersonalFastest {
+		lastlapStyle = styleGreen
+	}
+
+	return lastlapStyle.Render(lastlap)
 }
 
-func getTyre(m Model, driverNumber string) string {
-	if m.timingData[driverNumber].Retired || m.timingData[driverNumber].Status == 4 {
-		return "DNF"
+func getTyre(m Model, driverNumber string, isDNF bool) string {
+	if isDNF {
+		return "-"
 	}
 
 	l := len(m.timingAppData[driverNumber].Stints)
@@ -543,6 +630,56 @@ func getTyre(m Model, driverNumber string) string {
 	return fmt.Sprintf("%s %d laps", c, s.TotalLaps)
 }
 
+func getSectors(m Model, driverNumber string, isDNF bool) string {
+	if isDNF {
+		return "-"
+	}
+
+	var s1 f1livetiming.SectorTiming
+	var s2 f1livetiming.SectorTiming
+	var s3 f1livetiming.SectorTiming
+
+	if len(m.timingData[driverNumber].Sectors) > 0 {
+		s1 = m.timingData[driverNumber].Sectors[0]
+	}
+	if len(m.timingData[driverNumber].Sectors) > 1 {
+		s2 = m.timingData[driverNumber].Sectors[1]
+	}
+	if len(m.timingData[driverNumber].Sectors) > 2 {
+		s3 = m.timingData[driverNumber].Sectors[2]
+	}
+
+	return lipgloss.JoinHorizontal(
+		lipgloss.Center,
+		getSector(s1),
+		" ",
+		getSector(s2),
+		" ",
+		getSector(s3),
+	)
+}
+
+func getSector(s f1livetiming.SectorTiming) string {
+	style := lipgloss.NewStyle()
+	if s.Value == "" {
+		return style.Foreground(styleSubtle).Render("▃▃")
+	}
+	if s.OverallFastest {
+		return style.Foreground(purple).Render("▃▃")
+	}
+	if s.PersonalFastest {
+		return style.Foreground(green).Render("▃▃")
+	}
+	return style.Foreground(yellow).Render("▃▃")
+}
+
+func getBaseLap(m Model, driverNumber string) string {
+	if m.bestLaps[driverNumber] == "" {
+		return "-"
+	}
+	return m.bestLaps[driverNumber]
+}
+
 /* Private Helper Functions
 ------------------------------------------------------------------------------------------------- */
 
@@ -550,11 +687,12 @@ func newTable() table.Model {
 	return table.New([]table.Column{
 		table.NewColumn("position", "POS", 3),
 		table.NewColumn("driver", "DRIVER", 7).WithStyle(lipgloss.NewStyle().Align(lipgloss.Left)),
-		table.NewColumn("interval", "INT", 8),
+		table.NewColumn("interval", "INTERVAL", 8),
 		table.NewColumn("leader", "LEADER", 8),
 		table.NewColumn("tyre", "TYRE", 9),
-		table.NewColumn("bestlap", "BEST", 10),
 		table.NewColumn("lastlap", "LAST", 10),
+		table.NewColumn("sectors", "SECTORS", 10),
+		table.NewColumn("bestlap", "BEST", 10),
 	}).
 		WithRows([]table.Row{}).
 		WithBaseStyle(lipgloss.NewStyle().AlignHorizontal(lipgloss.Center))
