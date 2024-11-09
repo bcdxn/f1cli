@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"dario.cat/mergo"
 	"github.com/bcdxn/go-f1/f1livetiming"
@@ -33,7 +34,6 @@ type Model struct {
 	lapCount           f1livetiming.LapCount
 	lastTrackStatus    string
 	lastSessionStatus  string
-	latestSeriesStatus string
 	lastRaceControlMsg f1livetiming.RaceControlMessage
 	fastestLapOwner    string
 	fastestLap         string
@@ -385,54 +385,19 @@ func subtitleView(m Model) string {
 }
 
 func msgView(m Model, p string) string {
-	m.lastRaceControlMsg = f1livetiming.RaceControlMessage{
-		UTC:      "2024-10-27T20:24:35",
-		Lap:      13,
-		Category: "Other",
-		Message:  "FIA STEWARDS: TURN 4 INCIDENT INVOLVING CAR 1 (VER) UNDER INVESTIGATION - FORCING ANOTHER DRIVER OFF THE TRACK",
-	}
-	// m.lastRaceControlMsg = f1livetiming.RaceControlMessage{
-	// 	UTC:      "2024-10-27T20:24:35",
-	// 	Lap:      13,
-	// 	Category: "Other",
-	// 	Message:  "CAR 81 (PIA) TIME 1:22.312 DELETED - TRACK LIMITS AT TURN 2 LAP 38 14:59:43",
-	// }
-	// m.lastRaceControlMsg = f1livetiming.RaceControlMessage{
-	// 	UTC:      "2024-10-27T20:24:35",
-	// 	Lap:      13,
-	// 	Category: "Flag",
-	// 	Flag:     "DOUBLE YELLOW",
-	// 	Message:  "DOUBLE YELLOW IN SECTOR asdfkja ;sdfkaj d;flakjsf ;alsdkfj a;sdlfj as;dlfkjasd ;flkjas d;flaksjd f;laksdjf a;dlskfj a;sdlkfj a;sdlfkj as;dlfj as;dlfjk a;sdfk jas;dlfkj as;dlfk jas;dfkljas;ldf kjas;dlkfj a;sdlfkj a;lsdfj a;sdlfkj as;dlfjk as;dlfkj a;sdlfj as;dlf jas;ldfj ",
-	// }
-	// m.lastRaceControlMsg = f1livetiming.RaceControlMessage{
-	// 	UTC:      "2024-10-27T20:24:35",
-	// 	Lap:      13,
-	// 	Category: "Flag",
-	// 	Flag:     "CLEAR",
-	// 	Message:  "TRACK IS ALL CLEAR",
-	// }
-	// m.lastRaceControlMsg = f1livetiming.RaceControlMessage{
-	// 	UTC:      "2024-10-27T20:04:31",
-	// 	Lap:      1,
-	// 	Category: "SafetyCar",
-	// 	Status:   "DEPLOYED",
-	// 	Mode:     "SAFETY CAR",
-	// 	Message:  "SAFETY CAR DEPLOYED",
-	// }
-	// s := styleDialogBox
 	msg := m.lastRaceControlMsg.Message
 	if msg == "" {
 		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
 	}
 
-	// t, err := time.Parse("2006-01-02T15:04:05", m.lastRaceControlMsg.UTC)
-	// if err != nil {
-	// 	m.logger.Debug("unable to parse race control message time:", m.lastRaceControlMsg)
-	// 	return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
-	// }
-	// if time.Since(t).Seconds() > 15 {
-	// 	return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
-	// }
+	t, err := time.Parse("2006-01-02T15:04:05", m.lastRaceControlMsg.UTC)
+	if err != nil {
+		m.logger.Debug("unable to parse race control message time:", m.lastRaceControlMsg)
+		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
+	}
+	if time.Since(t).Seconds() > 15 {
+		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
+	}
 
 	cStyle := msgCategoryStyle
 	category := ""
@@ -456,6 +421,8 @@ func msgView(m Model, p string) string {
 		case "BLUE":
 			return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
 		case "CHEQUERED":
+			category = "RACE\nCONTROL"
+			cStyle = cStyle.Background(darkest).Foreground(light)
 		}
 	case "SafetyCar":
 		category = strings.Join(strings.Split(m.lastRaceControlMsg.Mode, " "), "\n")
@@ -474,27 +441,6 @@ func msgView(m Model, p string) string {
 		msg = fia.ReplaceAllString(msg, "")
 	}
 
-	// .Background(lipgloss.Color("#0b203b")).Foreground(lipgloss.Color("#d1d4dd"))
-
-	// switch m.lastRaceControlMsg.Category {
-	// case "Flag":
-	// 	switch m.lastRaceControlMsg.Flag {
-	// 	case "DOUBLE YELLOW":
-	// 		s.Foreground(yellow).BorderForeground(yellow)
-	// 	case "YELLOW":
-	// 		s.Foreground(yellow).BorderForeground(yellow)
-	// 	case "CLEAR":
-	// 		s.Foreground(green).BorderForeground(green)
-	// 	case "RED":
-	// 		s.Foreground(red).BorderForeground(red)
-	// 	case "BLUE":
-	// 		return lipgloss.JoinVertical(lipgloss.Top, p, p, p, p, p, p, p, p, p, p)
-	// 	case "CHEQUERED": // nothing special to do here
-	// 	}
-	// }
-
-	// if investigation.MatchString(msg) {
-	// s = s.Foreground(orange).BorderForeground(orange)
 	renderedCat := cStyle.Render(category)
 	renderedMsg := mStyle.Render(msg)
 

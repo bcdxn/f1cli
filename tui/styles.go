@@ -17,6 +17,7 @@ const (
 	fiaBlue      = lipgloss.Color("#0B203B")
 	light        = lipgloss.Color("#D1D4DD")
 	dark         = lipgloss.Color("#383838")
+	darkest      = lipgloss.Color("#222222")
 )
 
 var (
@@ -30,17 +31,9 @@ var (
 	styleH2 = lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false).
 		Align(lipgloss.Center)
-	stylePurple    = lipgloss.NewStyle().Foreground(lipgloss.Color(purple))
-	styleGreen     = lipgloss.NewStyle().Foreground(lipgloss.Color(green))
-	styleYellow    = lipgloss.NewStyle().Foreground(lipgloss.Color(yellow))
-	styleDialogBox = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			Padding(1, 1).
-			BorderTop(true).
-			BorderLeft(true).
-			BorderRight(true).
-			BorderBottom(true).
-			Align(lipgloss.Center)
+	stylePurple      = lipgloss.NewStyle().Foreground(lipgloss.Color(purple))
+	styleGreen       = lipgloss.NewStyle().Foreground(lipgloss.Color(green))
+	styleYellow      = lipgloss.NewStyle().Foreground(lipgloss.Color(yellow))
 	msgCategoryStyle = lipgloss.NewStyle().
 				Padding(1, 2).
 				Bold(true).
