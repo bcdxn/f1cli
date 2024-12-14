@@ -78,11 +78,10 @@ func Default() *Style {
 			Bold(true).
 			Border(lipgloss.NormalBorder(), false, false, true, false).
 			BorderForeground(primaryForeground).
-			Foreground(primaryForeground).
-			PaddingBottom(1),
+			Foreground(primaryForeground),
 		SubtitleBar: lipgloss.NewStyle().
 			Align(lipgloss.Center).
-			Border(lipgloss.NormalBorder(), true, false).
+			Border(lipgloss.NormalBorder(), false, false, true, false).
 			BorderForeground(primaryForeground).
 			Foreground(primaryForeground),
 		// toast message (i.e. race control messages) style

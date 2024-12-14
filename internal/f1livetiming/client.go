@@ -9,6 +9,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/bcdxn/f1cli/internal/domain"
 	"github.com/coder/websocket"
@@ -141,7 +145,7 @@ func (c *Client) Listen(ctx context.Context) {
 	}
 
 	for {
-		_, _, err := conn.Read(ctx)
+		_, msg, err := conn.Read(ctx)
 		if err != nil {
 			if ctx.Err() != nil || websocket.CloseStatus(err) == websocket.StatusNormalClosure {
 				conn.Close(websocket.StatusNormalClosure, "client closed")
@@ -151,7 +155,7 @@ func (c *Client) Listen(ctx context.Context) {
 			return
 		}
 		// No errors, process the message from the livetiming API
-		// c.processMessage(msg)
+		c.processMessage(msg)
 	}
 }
 
@@ -278,6 +282,298 @@ func (c Client) websocketURL() (*url.URL, error) {
 	}
 
 	return u, nil
+}
+
+var (
+	// The F1 API returns a mixed-type map which makes ummarshalling to strongly typed structs
+	// challenging, so we just strip the offending property from the message string using the kfRe
+	// regular expression.
+	kfRe = regexp.MustCompile(`,\s*"_kf":\s*(?:true|false)(,[^}])?`)
+)
+
+// processMessage checks the message coming the F1 LiveTiming Client to see if it is a 'change'
+// message or a 'reference' message and handles them appropriately, transforming the message into
+// 1 to none or many messages that can be written to the client channels.
+func (c *Client) processMessage(msg []byte) {
+	// Always try to parse a change message first since there is only 1 reference message and
+	// tens of thousands of change messages over the course of a session
+	var changeData f1ChangeMessage
+	err := json.Unmarshal(msg, &changeData)
+	if err == nil && len(changeData.ChangeSetId) > 0 && len(changeData.Messages) > 0 {
+		c.logger.Debug("received change data message")
+		c.processChangeMessage(changeData)
+		return
+	}
+	// Next try to parse a reference data message
+	referenceMsg := kfRe.ReplaceAllString(string(msg), "")
+	var referenceData f1ReferenceMessage
+	err = json.Unmarshal([]byte(referenceMsg), &referenceData)
+	if err == nil && referenceData.MessageInterval != "" {
+		c.logger.Debug("received reference data message")
+		c.logger.Debug(string(msg))
+		c.processReferenceMessage(referenceData)
+		return
+	}
+	// The message wasn't a known 'change' or 'reference' message type
+	c.logger.Debug("unhandled message", "msg", msg)
+}
+
+// processChangeMessage handles an incoming change message from the F1 Live Timing API; change
+// messages represent deltas to the original reference message and all preceeding change messages.
+// Once processed, a simplified event is emitted for use by the TUI.
+func (c *Client) processChangeMessage(changeMessage f1ChangeMessage) {
+	for _, m := range changeMessage.Messages {
+		if m.Hub == "Streaming" && m.Message == "feed" && len(m.Arguments) == 3 {
+			msgType := m.Arguments[0]
+			msgData := m.Arguments[1]
+			// Marshal the data part of the message so that we can unmarshal into strongly typed messages
+			// based on the messageType value.
+			msg, err := json.Marshal(msgData)
+			if err != nil {
+				c.logger.Warn("unable to marshal msg", "msg", msg)
+				return
+			}
+			switch msgType {
+			case "DriverList":
+				c.updateDriverIntrinsicData(c.ummarshalDriverListMsg(msg))
+			// case "TimingData":
+			// 	c.handleDriverTimingData(msg)
+			// case "SessionInfo":
+			// 	c.handleSessionInfoMsg(msg)
+			// case "SessionData":
+			// 	c.handleSessionDataMsg(msg)
+			// case "LapCount":
+			// 	c.handleLapCountMsg(msg)
+			// case "TimingAppData":
+			// 	c.handleTimingAppDataMsg(msg)
+			default:
+				c.logger.Warn("unknown change message", "type", msgType, "msg", msg)
+			}
+		}
+	}
+}
+
+func (c *Client) processReferenceMessage(referenceMessage f1ReferenceMessage) {
+	c.updateSessionInfo(referenceMessage.Reference.SessionInfo)
+	c.updateSessionData(
+		changeSessionDateFromReference(referenceMessage.Reference.SessionData),
+	)
+	c.updateDriverIntrinsicData(referenceMessage.Reference.DriverList)
+}
+
+/* Message Unmarshalers
+------------------------------------------------------------------------------------------------- */
+
+const (
+	f1APIDateLayout = "2006-01-02T15:04:05-0700" // date format used by the F1 LiveTiming API
+)
+
+// unmarshalSessionInfo converts the websocket message to a strongly typed struct.
+func (c *Client) unmarshalSessionInfo(msg []byte) sessionInfo {
+	var s sessionInfo
+	err := json.Unmarshal(msg, &s)
+	if err != nil {
+		c.logger.Warn("session info msg in unknown format", "msg", string(msg))
+	}
+
+	return s
+}
+
+// unmarshalSessionData converts the websocket message to a strongly typed struct.
+func (c *Client) unmarshalSessionDataMsg(msg []byte) changeSessionData {
+	var s changeSessionData
+	err := json.Unmarshal(msg, &s)
+	if err != nil {
+		c.logger.Warn("session data msg in unknown format", "msg", string(msg))
+	}
+
+	return s
+}
+
+// ummarshalDriverListMsg converts the websocket message to a strongly typed map of structs.
+func (c *Client) ummarshalDriverListMsg(msg []byte) map[string]driverData {
+	var d map[string]driverData
+	err := json.Unmarshal(msg, &d)
+	if err != nil {
+		c.logger.Warn("driver data msg in unknown format", "msg", string(msg))
+	}
+	return d
+}
+
+/* Channel Updaters
+------------------------------------------------------------------------------------------------- */
+
+// updateSessionInfo converts a SessionInfo msg from the F1 Live Timing API to the `Meeting` and
+// `Session` domain models  stored in the client's internal state store and writes the full state
+// of the meeting for consumers to read.
+func (c *Client) updateSessionInfo(session sessionInfo) {
+	setMeetingName(&c.meeting, session.Meeting.Name)
+	setMeetingFullName(&c.meeting, session.Meeting.OfficialName)
+	setMeetingLocation(&c.meeting, session.Meeting.Location)
+	setMeetingRoundNumber(&c.meeting, session.Meeting.Number)
+	setMeetingCountryCode(&c.meeting, session.Meeting.Country.Code)
+	setMeetingCountryName(&c.meeting, session.Meeting.Country.Name)
+	setMeetingCurcuitShortName(&c.meeting, session.Meeting.Circuit.ShortName)
+	setSessionName(&c.meeting, session.Name)
+	setSessionGMTOffset(&c.meeting, session.GMTOffset)
+	setSessionStartDate(&c.meeting, session.StartDate)
+	setSessionEndDate(&c.meeting, session.EndDate)
+	setSessionType(&c.meeting, session.Type)
+	c.meetingCh <- c.meeting
+}
+
+// updateSessionData converts a SessionData msg from the F1 LiveTiming API to the `Session` domain
+// model and writes the full state of the meeting/session for consumers to read.
+func (c *Client) updateSessionData(session changeSessionData) {
+	seriesKeys := make([]string, 0)
+	for key := range session.Series {
+		seriesKeys = append(seriesKeys, key)
+	}
+	// Access the series messages in order so that we end up on the latest entry
+	sort.Strings(seriesKeys)
+	for _, key := range seriesKeys {
+		setSessionPart(&c.meeting, session.Series[key].QualifyingPart)
+	}
+
+	c.meetingCh <- c.meeting
+}
+
+// updateDriverIntrinsicData converts DriverList msg from the F1 Live Timing API to the Driver
+// domain models stored in the client's internal state store and writes the full drivers store to
+// the drivers channel for consumers to read.
+func (c *Client) updateDriverIntrinsicData(driverDataMsg map[string]driverData) {
+	// update data for each driver to the drivers map
+	for number, data := range driverDataMsg {
+		// retrieve existing driver data from the map if it exists or create a new driver
+		driver, ok := c.drivers[number]
+		if !ok {
+			driver = domain.NewDriver(number)
+		}
+		// Overwrite fields
+		setShortName(&driver, data.ShortName)
+		setDriverName(&driver, data.FirstName, data.LastName, data.NameFormat)
+		setTeamName(&driver, data.TeamName)
+		setTeamColor(&driver, data.TeamColour)
+		setPosition(&driver, data.Line)
+		// write the driver data back to the client state store
+		c.drivers[number] = driver
+	}
+	c.driversCh <- c.drivers
+}
+
+/* Message Transformers
+------------------------------------------------------------------------------------------------- */
+
+func setShortName(driver *domain.Driver, shortName *string) {
+	if shortName != nil {
+		driver.ShortName = *shortName
+	}
+}
+
+func setDriverName(driver *domain.Driver, firstName, lastName, nameFormat *string) {
+	if firstName != nil && lastName != nil {
+		if nameFormat != nil && *nameFormat == "LastNameIsPrimary" {
+			driver.Name = *lastName + " " + *firstName
+		} else {
+			driver.Name = *firstName + " " + *lastName
+		}
+	}
+}
+
+func setTeamName(driver *domain.Driver, name *string) {
+	if name != nil {
+		driver.TeamName = *name
+	}
+}
+
+func setTeamColor(driver *domain.Driver, color *string) {
+	if color != nil {
+		driver.TeamColor = "#" + *color
+	}
+}
+
+func setPosition(driver *domain.Driver, pos *int) {
+	if pos != nil {
+		driver.TimingData.Position = *pos
+	}
+}
+
+func setMeetingName(meeting *domain.Meeting, name *string) {
+	if name != nil {
+		meeting.Name = *name
+	}
+}
+
+func setMeetingFullName(meeting *domain.Meeting, name *string) {
+	if name != nil {
+		meeting.FullName = *name
+	}
+}
+
+func setMeetingLocation(meeting *domain.Meeting, loc *string) {
+	if loc != nil {
+		meeting.Location = *loc
+	}
+}
+
+func setMeetingRoundNumber(meeting *domain.Meeting, num *int) {
+	if num != nil {
+		meeting.RoundNumber = *num
+	}
+}
+
+func setMeetingCountryCode(meeting *domain.Meeting, cc *string) {
+	if cc != nil {
+		meeting.CountryCode = *cc
+	}
+}
+
+func setMeetingCountryName(meeting *domain.Meeting, name *string) {
+	if name != nil {
+		meeting.CountryName = *name
+	}
+}
+
+func setMeetingCurcuitShortName(meeting *domain.Meeting, name *string) {
+	if name != nil {
+		meeting.CircuitShortName = *name
+	}
+}
+
+func setSessionName(meeting *domain.Meeting, name *string) {
+	if name != nil {
+		meeting.Session.Name = *name
+	}
+}
+
+func setSessionGMTOffset(meeting *domain.Meeting, offset *string) {
+	if offset != nil {
+		meeting.Session.GMTOffset = strings.Join(strings.Split(*offset, ":")[:2], "")
+	}
+}
+
+func setSessionStartDate(meeting *domain.Meeting, start *string) {
+	if start != nil {
+		meeting.Session.StartDate, _ = time.Parse(f1APIDateLayout, *start+meeting.Session.GMTOffset)
+	}
+}
+
+func setSessionEndDate(meeting *domain.Meeting, end *string) {
+	if end != nil {
+		meeting.Session.EndDate, _ = time.Parse(f1APIDateLayout, *end+meeting.Session.GMTOffset)
+	}
+}
+
+func setSessionType(meeting *domain.Meeting, t *string) {
+	if t != nil {
+		meeting.Session.Type = domain.SessionType(*t)
+	}
+}
+
+func setSessionPart(meeting *domain.Meeting, part *int) {
+	if part != nil {
+		meeting.Session.Part = *part
+	}
 }
 
 /* Private types

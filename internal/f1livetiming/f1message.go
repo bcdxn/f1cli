@@ -398,3 +398,14 @@ type lapCount struct {
 	CurrentLap *int `json:"CurrentLap"`
 	TotalLaps  *int `json:"TotalLaps"`
 }
+
+// f1ChangeMessage represents a 'change' message sent on the websocket connection from the server.
+// It is a delta between the reference data and any other preceeding change messages.
+type f1ChangeMessage struct {
+	ChangeSetId string `json:"C"`
+	Messages    []struct {
+		Hub       string `json:"H"`
+		Message   string `json:"M"`
+		Arguments []any  `json:"A"`
+	} `json:"M"`
+}
