@@ -336,14 +336,14 @@ func (c *Client) processChangeMessage(changeMessage f1ChangeMessage) {
 			switch msgType {
 			case "DriverList":
 				c.updateDriverIntrinsicData(c.ummarshalDriverListMsg(msg))
-			// case "TimingData":
-			// 	c.handleDriverTimingData(msg)
-			// case "SessionInfo":
-			// 	c.handleSessionInfoMsg(msg)
-			// case "SessionData":
-			// 	c.handleSessionDataMsg(msg)
-			// case "LapCount":
-			// 	c.handleLapCountMsg(msg)
+			case "TimingData":
+				c.updateDriverTimingData(c.unmarshalDriverTimingDataMsg(msg))
+			case "SessionInfo":
+				c.updateSessionInfo(c.unmarshalSessionInfoMsg(msg))
+			case "SessionData":
+				c.updateSessionData(c.unmarshalSessionDataMsg(msg))
+			case "LapCount":
+				c.updateLapCount(c.unmarshalLapCountMsg(msg))
 			// case "TimingAppData":
 			// 	c.handleTimingAppDataMsg(msg)
 			default:
@@ -359,6 +359,7 @@ func (c *Client) processReferenceMessage(referenceMessage f1ReferenceMessage) {
 		changeSessionDateFromReference(referenceMessage.Reference.SessionData),
 	)
 	c.updateDriverIntrinsicData(referenceMessage.Reference.DriverList)
+	c.updateLapCount(referenceMessage.Reference.LapCount)
 }
 
 /* Message Unmarshalers
@@ -369,13 +370,12 @@ const (
 )
 
 // unmarshalSessionInfo converts the websocket message to a strongly typed struct.
-func (c *Client) unmarshalSessionInfo(msg []byte) sessionInfo {
+func (c *Client) unmarshalSessionInfoMsg(msg []byte) sessionInfo {
 	var s sessionInfo
 	err := json.Unmarshal(msg, &s)
 	if err != nil {
 		c.logger.Warn("session info msg in unknown format", "msg", string(msg))
 	}
-
 	return s
 }
 
@@ -386,7 +386,6 @@ func (c *Client) unmarshalSessionDataMsg(msg []byte) changeSessionData {
 	if err != nil {
 		c.logger.Warn("session data msg in unknown format", "msg", string(msg))
 	}
-
 	return s
 }
 
@@ -398,6 +397,26 @@ func (c *Client) ummarshalDriverListMsg(msg []byte) map[string]driverData {
 		c.logger.Warn("driver data msg in unknown format", "msg", string(msg))
 	}
 	return d
+}
+
+// unmarshalLapCountMsg converts the websocket message to a strongly typed struct.
+func (c *Client) unmarshalLapCountMsg(msg []byte) lapCount {
+	var lc lapCount
+	err := json.Unmarshal(msg, &lc)
+	if err != nil {
+		c.logger.Warn("lap count msg in unknown format", "msg", string(msg))
+	}
+	return lc
+}
+
+// unmarshalDriverTimingDataMsg converts the websocket message to a strongly typed struct.
+func (c *Client) unmarshalDriverTimingDataMsg(msg []byte) changeTimingData {
+	var timingDataMsg changeTimingData
+	err := json.Unmarshal(msg, &timingDataMsg)
+	if err != nil {
+		c.logger.Warn("timing data msg in unknown format", "msg", string(msg))
+	}
+	return timingDataMsg
 }
 
 /* Channel Updaters
@@ -461,6 +480,104 @@ func (c *Client) updateDriverIntrinsicData(driverDataMsg map[string]driverData) 
 	c.driversCh <- c.drivers
 }
 
+// updateLapCount converts LapCount msg from the F1 Live Timing API to the RaceWeekendEvent`
+// stored in the client's internal state store and writes a notification on the event channel to let
+// consumers know the data has changed.
+func (c *Client) updateLapCount(lc lapCount) {
+	if lc.CurrentLap != nil {
+		c.meeting.Session.CurrentLap = *lc.CurrentLap
+	}
+	if lc.TotalLaps != nil {
+		c.meeting.Session.TotalLaps = *lc.TotalLaps
+	}
+
+	c.meetingCh <- c.meeting
+}
+
+// updateDriverTimingData updates the driver timing data state store and writes the full snapshot
+func (c *Client) updateDriverTimingData(timingDataMsg changeTimingData) {
+	// only send a notification event fon the session channel if the session was updated
+	sessionUpdated := false
+	// add data for each driver to the drivers map
+	for number, data := range timingDataMsg.Lines {
+		// retrieve existing driver data from the map if it exists or create a new driver
+		driver, ok := c.drivers[number]
+		if !ok {
+			driver = domain.NewDriver(number)
+		}
+		// Overwrite fields
+		setPosition(&driver, data.Line)
+		setLeaderGap(&driver, data.GapToLeader)
+		setIntervalGap(&driver, data.IntervalToPositionAhead.Value)
+		setLastLap(&driver, data.LastLapTime.Value, data.LastLapTime.PersonalFastest)
+		if data.LastLapTime.OverallFastest != nil && *data.LastLapTime.OverallFastest {
+			c.meeting.Session.FastestLapOwner = number
+			sessionUpdated = true
+		}
+		setBestLap(&driver, data.BestLapTime.Value)
+		// driver.SetIsKnockedOut(timingData.KnockedOut)
+		// driver.SetCutoff(timingData.Cutoff)
+		// driver.SetIsRetired(timingData.Retired)
+		// driver.SetNumberOfLaps(timingData.NumberOfLaps)
+		// if timingData.Status != nil &&
+		// 	(*timingData.Status == statusCrashDamageRetiredInPit ||
+		// 		*timingData.Status == statusCrashDamageRetiredOnTrack) {
+		// 	driver.SetIsRetired(boolPointer(true))
+		// }
+		// // In Qualifying Sessions the interval is stored separately for each qualifying part; we're only
+		// // interested the most recent qualifying part, so we iterate through (the list is in order) and
+		// // overwrite the gaps for each available qualifying part ending with the most recent.
+		// parts := make([]string, 0, 3)
+		// for part := range timingData.Stats {
+		// 	parts = append(parts, part)
+		// }
+		// sort.Strings(parts)
+		// for _, part := range parts {
+		// 	driver.SetLeaderGap(timingData.Stats[part].TimeDiffToFastest)
+		// 	driver.SetIntervalGap(timingData.Stats[part].TimeDiffToPositionAhead)
+		// }
+		// // Sort sectors before
+		// sectorNums := make([]string, 0, 3)
+		// for sectorNum := range timingData.Sectors {
+		// 	sectorNums = append(sectorNums, sectorNum)
+		// }
+		// sort.Strings(sectorNums)
+		// for _, sectorNum := range sectorNums {
+		// 	i, _ := strconv.Atoi(sectorNum)
+		// 	sector := timingData.Sectors[sectorNum]
+		// 	driver.SetSector(i, sector.Value, sector.PersonalBest, sector.OverallBest)
+		// 	if sector.OverallBest != nil && *sector.OverallBest {
+		// 		c.event.Session.FastestSectorOwner[i] = number
+		// 		sessionUpdated = true
+		// 	}
+		// }
+		// // Set the Pit status _after_ setting sectors, because these functions may overwrite sector
+		// // data to prevent weird scenarios of having sector times posted while in the PIT or Outlap
+		// driver.SetIsInPit(timingData.InPit)
+		// driver.SetIsPitOut(timingData.PitOut)
+		// if timingData.PitOut != nil && *timingData.PitOut {
+		// }
+		// // Sort session parts before
+		// partNums := make([]string, 0, 3)
+		// for partNum := range timingData.BestLapTimes {
+		// 	partNums = append(sectorNums, partNum)
+		// }
+		// sort.Strings(partNums)
+		// for _, partNum := range partNums {
+		// 	i, _ := strconv.Atoi(partNum)
+		// 	driver.SetBestLapInPart(i, timingData.BestLapTimes[partNum].Value)
+		// }
+
+		// update the driver data in the map
+		c.drivers[number] = driver
+	}
+
+	c.driversCh <- c.drivers
+	if sessionUpdated {
+		c.meetingCh <- c.meeting
+	}
+}
+
 /* Message Transformers
 ------------------------------------------------------------------------------------------------- */
 
@@ -495,6 +612,50 @@ func setTeamColor(driver *domain.Driver, color *string) {
 func setPosition(driver *domain.Driver, pos *int) {
 	if pos != nil {
 		driver.TimingData.Position = *pos
+	}
+}
+
+func setLeaderGap(driver *domain.Driver, gap *string) {
+	if driver.TimingData.Position == 1 {
+		driver.TimingData.LeaderGap = ""
+	} else if gap != nil && *gap != "" {
+		driver.TimingData.LeaderGap = *gap
+	}
+}
+
+func setIntervalGap(driver *domain.Driver, gap *string) {
+	if driver.TimingData.Position == 1 {
+		driver.TimingData.IntervalGap = ""
+	} else if gap != nil && *gap != "" {
+		driver.TimingData.IntervalGap = *gap
+	}
+}
+
+func setLastLap(driver *domain.Driver, time *string, personalFastest *bool) {
+	if time != nil && *time != "" {
+		driver.TimingData.LastLap.Time = *time
+	}
+
+	if personalFastest != nil {
+		driver.TimingData.LastLap.IsPersonalBest = *personalFastest
+	}
+}
+
+func setBestLap(driver *domain.Driver, time *string) {
+	if time != nil && *time != "" {
+		driver.TimingData.BestLapTime = *time
+	}
+}
+
+func setIsKnockedOut(driver *domain.Driver, out *bool) {
+	if out != nil {
+		driver.TimingData.IsKnockedOut = *out
+	}
+}
+
+func setIsRetired(driver *domain.Driver, out *bool) {
+	if out != nil {
+		driver.TimingData.IsRetired = *out
 	}
 }
 

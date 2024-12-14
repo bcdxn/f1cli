@@ -284,7 +284,7 @@ func driverLastLap(d domain.Driver, m domain.Meeting) string {
 	if d.TimingData.LastLap.Time != "" {
 		v = d.TimingData.LastLap.Time
 
-		if m.Session.FastestLapTime == d.TimingData.LastLap.Time {
+		if d.Number == m.Session.FastestLapOwner && d.TimingData.LastLap.Time == d.TimingData.BestLapTime {
 			v = lipgloss.NewStyle().Foreground(s.Color.Purple).Render(v)
 		} else if d.TimingData.LastLap.IsPersonalBest {
 			v = lipgloss.NewStyle().Foreground(s.Color.Green).Render(v)
@@ -307,9 +307,7 @@ func driverBestLap(d domain.Driver, m domain.Meeting) string {
 		return s.Subtle.Render(v)
 	}
 
-	v = d.TimingData.BestLapTime
-
-	if d.TimingData.BestLapTime == m.Session.FastestLapTime {
+	if d.Number == m.Session.FastestLapOwner {
 		v = lipgloss.NewStyle().Foreground(lipgloss.Color(s.Color.Purple)).Render(v)
 	}
 
