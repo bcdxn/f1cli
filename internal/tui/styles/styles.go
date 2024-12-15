@@ -78,7 +78,8 @@ func Default() *Style {
 			Bold(true).
 			Border(lipgloss.NormalBorder(), false, false, true, false).
 			BorderForeground(primaryForeground).
-			Foreground(primaryForeground),
+			Foreground(primaryForeground).
+			PaddingBottom(1),
 		SubtitleBar: lipgloss.NewStyle().
 			Align(lipgloss.Center).
 			Border(lipgloss.NormalBorder(), false, false, true, false).

@@ -284,12 +284,14 @@ func driverLastLap(d domain.Driver, m domain.Meeting) string {
 	if d.TimingData.LastLap.Time != "" {
 		v = d.TimingData.LastLap.Time
 
-		if d.Number == m.Session.FastestLapOwner && d.TimingData.LastLap.Time == d.TimingData.BestLapTime {
-			v = lipgloss.NewStyle().Foreground(s.Color.Purple).Render(v)
+		if d.TimingData.IsRetired {
+			v = s.Subtle.Render(v)
+		} else if d.Number == m.Session.FastestLapOwner && d.TimingData.LastLap.Time == d.TimingData.BestLapTime {
+			v = s.Purple.Render(v)
 		} else if d.TimingData.LastLap.IsPersonalBest {
-			v = lipgloss.NewStyle().Foreground(s.Color.Green).Render(v)
+			v = s.Green.Render(v)
 		} else {
-			v = lipgloss.NewStyle().Foreground(s.Color.Yellow).Render(v)
+			v = s.Yellow.Render(v)
 		}
 	}
 
