@@ -323,8 +323,12 @@ func (c *Client) processMessage(msg []byte) {
 // messages represent deltas to the original reference message and all preceeding change messages.
 // Once processed, a simplified event is emitted for use by the TUI.
 func (c *Client) processChangeMessage(changeMessage f1ChangeMessage) {
+	meetingUpdating := false
+	driversUpdated := false
+	raceCtrlMsgsUpdated := false
 	for _, m := range changeMessage.Messages {
 		if m.Hub == "Streaming" && m.Message == "feed" && len(m.Arguments) == 3 {
+			var s, d, r bool
 			msgType := m.Arguments[0]
 			msgData := m.Arguments[1]
 			// Marshal the data part of the message so that we can unmarshal into strongly typed messages
@@ -336,21 +340,41 @@ func (c *Client) processChangeMessage(changeMessage f1ChangeMessage) {
 			}
 			switch msgType {
 			case "DriverList":
-				c.updateDriverIntrinsicData(c.ummarshalDriverListMsg(msg))
+				s, d, r = c.updateDriverIntrinsicData(c.ummarshalDriverListMsg(msg))
 			case "TimingData":
-				c.updateDriverTimingData(c.unmarshalDriverTimingDataMsg(msg))
+				s, d, r = c.updateDriverTimingData(c.unmarshalDriverTimingDataMsg(msg))
 			case "SessionInfo":
-				c.updateSessionInfo(c.unmarshalSessionInfoMsg(msg))
+				s, d, r = c.updateSessionInfo(c.unmarshalSessionInfoMsg(msg))
 			case "SessionData":
-				c.updateSessionData(c.unmarshalSessionDataMsg(msg))
+				s, d, r = c.updateSessionData(c.unmarshalSessionDataMsg(msg))
 			case "LapCount":
-				c.updateLapCount(c.unmarshalLapCountMsg(msg))
+				s, d, r = c.updateLapCount(c.unmarshalLapCountMsg(msg))
 			case "TimingAppData":
-				c.updateTimingAppData(c.unmarshalTimingAppDataMsg(msg))
+				s, d, r = c.updateTimingAppData(c.unmarshalTimingAppDataMsg(msg))
 			default:
 				c.logger.Warn("unknown change message", "type", msgType, "msg", msg)
 			}
+
+			if s {
+				meetingUpdating = true
+			}
+			if d {
+				driversUpdated = true
+			}
+			if r {
+				raceCtrlMsgsUpdated = true
+			}
 		}
+	}
+
+	if meetingUpdating {
+		c.meetingCh <- c.meeting
+	}
+	if driversUpdated {
+		c.writeDriversToChan()
+	}
+	if raceCtrlMsgsUpdated {
+		c.writeRaceCtrlMsgsToChan()
 	}
 }
 
@@ -361,6 +385,10 @@ func (c *Client) processReferenceMessage(referenceMessage f1ReferenceMessage) {
 	)
 	c.updateDriverIntrinsicData(referenceMessage.Reference.DriverList)
 	c.updateLapCount(referenceMessage.Reference.LapCount)
+
+	c.meetingCh <- c.meeting
+	c.writeDriversToChan()
+	c.writeRaceCtrlMsgsToChan()
 }
 
 /* Message Unmarshalers
@@ -437,7 +465,9 @@ func (c *Client) unmarshalTimingAppDataMsg(msg []byte) changeTimingAppData {
 // updateSessionInfo converts a SessionInfo msg from the F1 Live Timing API to the `Meeting` and
 // `Session` domain models  stored in the client's internal state store and writes the full state
 // of the meeting for consumers to read.
-func (c *Client) updateSessionInfo(session sessionInfo) {
+func (c *Client) updateSessionInfo(session sessionInfo) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+	// this function always updates session
+	meetingUpdating = true
 	setMeetingName(&c.meeting, session.Meeting.Name)
 	setMeetingFullName(&c.meeting, session.Meeting.OfficialName)
 	setMeetingLocation(&c.meeting, session.Meeting.Location)
@@ -450,12 +480,15 @@ func (c *Client) updateSessionInfo(session sessionInfo) {
 	setSessionStartDate(&c.meeting, session.StartDate)
 	setSessionEndDate(&c.meeting, session.EndDate)
 	setSessionType(&c.meeting, session.Type)
-	c.meetingCh <- c.meeting
+	return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
 }
 
 // updateSessionData converts a SessionData msg from the F1 LiveTiming API to the `Session` domain
 // model and writes the full state of the meeting/session for consumers to read.
-func (c *Client) updateSessionData(session changeSessionData) {
+func (c *Client) updateSessionData(session changeSessionData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+	// this function always updates session
+	meetingUpdating = true
+
 	seriesKeys := make([]string, 0)
 	for key := range session.Series {
 		seriesKeys = append(seriesKeys, key)
@@ -466,11 +499,13 @@ func (c *Client) updateSessionData(session changeSessionData) {
 		setSessionPart(&c.meeting, session.Series[key].QualifyingPart)
 	}
 
-	c.meetingCh <- c.meeting
+	return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
 }
 
 // updateDriverIntrinsicData updates the intrinsic driver data (and occassionally position).
-func (c *Client) updateDriverIntrinsicData(driverDataMsg map[string]driverData) {
+func (c *Client) updateDriverIntrinsicData(driverDataMsg map[string]driverData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+	// this function always updates drivers
+	driversUpdated = true
 	// update data for each driver to the drivers map
 	for number, data := range driverDataMsg {
 		// retrieve existing driver data from the map if it exists or create a new driver
@@ -487,11 +522,13 @@ func (c *Client) updateDriverIntrinsicData(driverDataMsg map[string]driverData) 
 		// write the driver data back to the client state store
 		c.drivers[number] = driver
 	}
-	c.driversCh <- c.drivers
+	return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
 }
 
 // updateLapCount updates the current/total lap data (only applicable during races).
-func (c *Client) updateLapCount(lc lapCount) {
+func (c *Client) updateLapCount(lc lapCount) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+	// this function always update the session
+	meetingUpdating = true
 	if lc.CurrentLap != nil {
 		c.meeting.Session.CurrentLap = *lc.CurrentLap
 	}
@@ -499,13 +536,13 @@ func (c *Client) updateLapCount(lc lapCount) {
 		c.meeting.Session.TotalLaps = *lc.TotalLaps
 	}
 
-	c.meetingCh <- c.meeting
+	return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
 }
 
 // updateDriverTimingData updates driver timing and position data.
-func (c *Client) updateDriverTimingData(timingDataMsg changeTimingData) {
-	// only send a notification event fon the session channel if the session was updated
-	sessionUpdated := false
+func (c *Client) updateDriverTimingData(timingDataMsg changeTimingData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+	// this function always updates drivers
+	driversUpdated = true
 	// add data for each driver to the drivers map
 	for number, data := range timingDataMsg.Lines {
 		// retrieve existing driver data from the map if it exists or create a new driver
@@ -519,42 +556,33 @@ func (c *Client) updateDriverTimingData(timingDataMsg changeTimingData) {
 		setLastLap(&driver, data.LastLapTime.Value, data.LastLapTime.PersonalFastest)
 		if data.LastLapTime.OverallFastest != nil && *data.LastLapTime.OverallFastest {
 			c.meeting.Session.FastestLapOwner = number
-			sessionUpdated = true
+			meetingUpdating = true
 		}
 		setBestLap(&driver, data.BestLapTime.Value)
 		setIsKnockedOut(&driver, data.KnockedOut)
 		setIsRetired(&driver, data.Retired, data.Status)
 		setNumberOfLaps(&driver, data.NumberOfLaps)
 		if updated := setSectors(&driver, &c.meeting, data.Sectors); updated {
-			sessionUpdated = true
+			meetingUpdating = true
 		}
-		// // Set the Pit status _after_ setting sectors, because these functions may overwrite sector
-		// // data to prevent weird scenarios of having sector times posted while in the PIT or Outlap
+		// Set the Pit status _after_ setting sectors, because these functions may overwrite sector
+		// data to prevent weird scenarios of having sector times posted while in the PIT or Outlap
 		setIsInPit(&driver, data.InPit)
 		setIsPitOut(&driver, data.PitOut)
-		// // Sort session parts before
-		// partNums := make([]string, 0, 3)
-		// for partNum := range timingData.BestLapTimes {
-		// 	partNums = append(sectorNums, partNum)
-		// }
-		// sort.Strings(partNums)
-		// for _, partNum := range partNums {
-		// 	i, _ := strconv.Atoi(partNum)
-		// 	driver.SetBestLapInPart(i, timingData.BestLapTimes[partNum].Value)
-		// }
+		// keep track of best lap times in each qualifying part
+		setBestLapInPart(&driver, data)
 
 		// update the driver data in the map
 		c.drivers[number] = driver
 	}
 
-	c.driversCh <- c.drivers
-	if sessionUpdated {
-		c.meetingCh <- c.meeting
-	}
+	return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
 }
 
 // updateTimingAppData updates driver stint and position data.
-func (c *Client) updateTimingAppData(tad changeTimingAppData) {
+func (c *Client) updateTimingAppData(tad changeTimingAppData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+	// thils function always updates drivers
+	driversUpdated = true
 	for driverNum, timingAppData := range tad.Lines {
 		// if multiple stints are given (e.g. in the reference message) we'll iterate through them,
 		// taking the stint with the largest key (which are numbers indicating the order)
@@ -562,17 +590,18 @@ func (c *Client) updateTimingAppData(tad changeTimingAppData) {
 		for stintNum := range timingAppData.Stints {
 			stints = append(stints, stintNum)
 		}
+		if len(stints) == 0 {
+			continue
+		}
 		// sort the stints in descending order by key so we can take the largest key at index 0
 		sort.Slice(stints, func(i, j int) bool {
 			return stints[i] > stints[j]
 		})
-		if len(stints) == 0 {
-			continue
-		}
 		currentStint := stints[0]
 
 		driver, ok := c.drivers[driverNum]
 		if !ok {
+			c.logger.Error("drivre not found", "num", driverNum)
 			driver = domain.NewDriver(driverNum)
 		}
 		if len(timingAppData.Stints) > 0 {
@@ -585,7 +614,27 @@ func (c *Client) updateTimingAppData(tad changeTimingAppData) {
 		c.drivers[driverNum] = driver
 	}
 
-	c.driversCh <- c.drivers
+	return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
+}
+
+// Because maps are not concurrency-safe, we'll copy the map before writing it to the channel that
+// can be read by concurrent goroutines.
+func (c *Client) writeDriversToChan() {
+	cpy := make(map[string]domain.Driver)
+
+	for key, val := range c.drivers {
+		cpy[key] = val
+	}
+
+	c.driversCh <- cpy
+}
+
+// Because slices are not concurrency-safe, we'll copy the slice before writing it to the channel
+// that can be read by concurrent goroutines.
+func (c *Client) writeRaceCtrlMsgsToChan() {
+	cpy := make([]domain.RaceCtrlMsg, 0, len(c.raceCtrlMsgs))
+	copy(cpy, c.raceCtrlMsgs)
+	c.raceCtrlMsgsCh <- cpy
 }
 
 /* Message Transformers
@@ -717,7 +766,7 @@ func setIsPitOut(driver *domain.Driver, out *bool) {
 }
 
 func setSectors(driver *domain.Driver, meeting *domain.Meeting, sectors map[string]sectorTiming) bool {
-	sessionUpdated := false
+	meetingUpdating := false
 	// Sort sectors before
 	sectorNums := make([]string, 0, 3)
 	for sectorNum := range sectors {
@@ -750,11 +799,26 @@ func setSectors(driver *domain.Driver, meeting *domain.Meeting, sectors map[stri
 		}
 		if sector.OverallBest != nil && *sector.OverallBest {
 			meeting.Session.FastestSectorOwner[i] = driver.Number
-			sessionUpdated = true
+			meetingUpdating = true
 		}
 	}
 
-	return sessionUpdated
+	return meetingUpdating
+}
+
+func setBestLapInPart(driver *domain.Driver, data changeDriverTimingData) {
+	// Sort session parts before
+	partNums := make([]string, 0, 3)
+	for partNum := range data.BestLapTimes {
+		partNums = append(partNums, partNum)
+	}
+	sort.Strings(partNums)
+	for _, partNum := range partNums {
+		i, _ := strconv.Atoi(partNum)
+		if data.BestLapTimes[partNum].Value != nil {
+			driver.TimingData.BestLapTimes[i] = *data.BestLapTimes[partNum].Value
+		}
+	}
 }
 
 func setMeetingName(meeting *domain.Meeting, name *string) {
