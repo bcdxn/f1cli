@@ -133,8 +133,8 @@ func viewHeader(l Leaderboard) string {
 func viewTable(l Leaderboard) string {
 	t := ""
 	switch l.meeting.Session.Type {
-	// case domain.SessionTypeQualifying:
-	// 	return viewQualifyingTable(m)
+	case domain.SessionTypeQualifying:
+		return viewQualifyingTable(l)
 	case domain.SessionTypeRace:
 		return viewRaceTable(l)
 	}
@@ -146,6 +146,46 @@ func viewTable(l Leaderboard) string {
 		lipgloss.WithWhitespaceChars("."),
 		lipgloss.WithWhitespaceForeground(s.Color.Subtle),
 	)
+}
+
+func viewQualifyingTable(l Leaderboard) string {
+	baseStyle := lipgloss.NewStyle().Padding(0, 1, 1, 1)
+	drivers := sortDrivers(l.drivers)
+	rows := make([][]string, 0, len(drivers))
+
+	for _, d := range drivers {
+		rows = append(rows, []string{
+			driverPosition(d),
+			driverName(d, l.meeting),
+			driverIntervalGap(d),
+			driverLeaderGap(d),
+			driverSectors(d, l.meeting),
+			driverBestLapInPart(d, 0),
+			driverBestLapInPart(d, 1),
+			driverBestLapInPart(d, 2),
+		})
+	}
+
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		// BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("99"))).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			style := baseStyle
+
+			if row == len(rows)-1 {
+				style = style.Padding(0, 1)
+			}
+
+			if col == 0 {
+				style = style.Align(lipgloss.Right)
+			}
+
+			return style
+		}).
+		Headers("POS", "DRIVER", "INT", "LEADER", "SECTORS", "Q1 BEST", "Q2 BEST", "Q3 BEST").
+		Rows(rows...)
+
+	return t.Render()
 }
 
 func viewRaceTable(l Leaderboard) string {
@@ -311,6 +351,20 @@ func driverBestLap(d domain.Driver, m domain.Meeting) string {
 
 	if d.Number == m.Session.FastestLapOwner {
 		v = lipgloss.NewStyle().Foreground(lipgloss.Color(s.Color.Purple)).Render(v)
+	}
+
+	return v
+}
+
+func driverBestLapInPart(d domain.Driver, part int) string {
+	v := d.TimingData.BestLapTimes[part]
+
+	if v == "" {
+		v = "-"
+	}
+
+	if d.TimingData.IsKnockedOut || d.TimingData.IsRetired {
+		return s.Subtle.Render(v)
 	}
 
 	return v
