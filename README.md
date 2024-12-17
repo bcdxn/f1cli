@@ -4,3 +4,5 @@
 # F1 CLI
 
 _Formula 1 in your terminal_
+
+![race](readme-assets/race-leaderboard.png)
