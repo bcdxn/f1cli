@@ -5,4 +5,4 @@
 
 _Formula 1 in your terminal_
 
-![race](readme-assets/race-leaderboard.png)
+![race](readme-assets/demo.gif)
