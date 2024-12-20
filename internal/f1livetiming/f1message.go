@@ -1,6 +1,7 @@
 package f1livetiming
 
 import (
+	"encoding/json"
 	"strconv"
 	"time"
 )
@@ -14,52 +15,100 @@ const (
 	// statusInPit                     = 80
 )
 
+// f1Message represents a websocket message from the F1 Live Timing API. It comes in two primary
+// varieties: Change messages and Reference messages. There is a single Reference message sent at
+// the beginning of the websocket connection, followed by updates via Change maessages.
+type f1Message struct {
+	Changes   json.RawMessage `json:"M"`
+	Reference json.RawMessage `json:"R"`
+}
+
+// f1ChangeMessage represents a 'change' message sent on the websocket connection from the server.
+// It is a delta between the reference data and any other preceeding change messages.
+type f1ChangeMessage struct {
+	Arguments []json.RawMessage `json:"A"`
+}
+
 // f1ReferenceMessance represents the initial state of a session for all of the requested data from
 // the F1 Live Timing API. This includes intrinsic data about the session as well as driver, timing
 // and status data. The reference message should be used to create an initial state; all other
 // messages are 'Change' data messages that alter the state managed by the API consumer.
 type f1ReferenceMessage struct {
-	Reference struct {
-		Heartbeat     heartbeat              `json:"Heartbeat"`           // Heartbeat is the most recent heartbeat emitted
-		TimingAppData referenceTimingAppData `json:"TimingAppData"`       // TimingAppData contains per-driver stint information
-		DriverList    map[string]driverData  `json:"DriverList"`          // DriverList contains per-driver intrinsic data
-		RaceCtrlMsgs  referenceRaceCtrlMsgs  `json:"RaceControlMessages"` // RaceCtrlMsgs contains all emitted race control messages
-		SessionInfo   sessionInfo            `json:"SessionInfo"`         // SessionInfo contains intrinsic data about the event and session
-		SessionData   referenceSessionData   `json:"SessionData"`         // SesionData contains all emitted session and track status changes
-		TimingData    referenceTimingData    `json:"TimingData"`          // TimingData represents driver-specific lap times, intervals, etc.
-		LapCount      lapCount               `json:"LapCount"`            // LapCount contains the latest lap (current/total) data
-	} `json:"R"`
-	MessageInterval string `json:"I"`
+	Heartbeat     json.RawMessage `json:"Heartbeat"`           // Heartbeat is the most recent heartbeat emitted
+	TimingAppData json.RawMessage `json:"TimingAppData"`       // TimingAppData contains per-driver stint information
+	DriverList    json.RawMessage `json:"DriverList"`          // DriverList contains per-driver intrinsic data
+	RaceCtrlMsgs  json.RawMessage `json:"RaceControlMessages"` // RaceCtrlMsgs contains all emitted race control messages
+	SessionInfo   json.RawMessage `json:"SessionInfo"`         // SessionInfo contains intrinsic data about the event and session
+	SessionData   json.RawMessage `json:"SessionData"`         // SesionData contains all emitted session and track status changes
+	TimingData    json.RawMessage `json:"TimingData"`          // TimingData represents driver-specific lap times, intervals, etc.
+	LapCount      json.RawMessage `json:"LapCount"`            // LapCount contains the latest lap (current/total) data
 }
 
 // The heartbeat message indicates the client connection to the server is working even if there are
-// no other messages coming from the server.
+// no other messages coming from the server and keeps the websocket connection alive.
 type heartbeat struct {
 	ReceivedAt time.Time `json:"Utc"`
 }
 
-// referenceTimingAppData contains per-driver stint information including lap count and tire
-// compound.
-type referenceTimingAppData struct {
-	Lines map[string]struct {
-		RacingNumber string  `json:"RacingNumber"`
-		Line         *int    `json:"Line"`
-		GridPos      string  `json:"GridPos"`
-		Stints       []stint `json:"Stints"`
-	} `json:"Lines"`
+// timingAppData contains per-driver stint information, e.g. tire compound, stint length and driver
+// position.
+type timingAppData struct {
+	Lines driverTimingAppMap `json:"Lines"`
 }
 
-// changeTimingAppData contains per-driver stint information similar to `referenceTimingAppData` but
-// the data structure containing the stint information is a map instead of a slice.
-type changeTimingAppData struct {
-	Lines map[string]changeDrivingTimingAppData `json:"Lines"`
+// driverTimingAppList is a type allowing for custom ummarshaling of the driver timing app data
+// which can include additional non-driver fields (e.g. _kf:true kvps).
+type driverTimingAppMap map[string]drivingTimingAppData
+
+func (dl *driverTimingAppMap) UnmarshalJSON(data []byte) error {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	//
+	filteredDriverList := make(map[string]drivingTimingAppData)
+	for k, v := range m {
+		if _, err := strconv.Atoi(k); err != nil {
+			continue
+		}
+		var d drivingTimingAppData
+		if err := json.Unmarshal(v, &d); err != nil {
+			continue
+		}
+		filteredDriverList[k] = d
+	}
+
+	*dl = filteredDriverList
+	return nil
 }
 
-type changeDrivingTimingAppData struct {
-	RacingNumber string           `json:"RacingNumber"`
-	Line         *int             `json:"Line"`
-	GridPos      string           `json:"GridPos"`
-	Stints       map[string]stint `json:"Stints"`
+// driverTimingAppData includes individual timing app data for a specific driver.
+type drivingTimingAppData struct {
+	RacingNumber string `json:"RacingNumber"`
+	Line         *int   `json:"Line"`
+	GridPos      string `json:"GridPos"`
+	Stints       stints `json:"Stints"`
+}
+
+type stints map[string]stint
+
+func (s *stints) UnmarshalJSON(data []byte) error {
+	// first attempt to unmarshal change message structure (map)
+	m := make(map[string]stint)
+	if err := json.Unmarshal(data, &m); err == nil {
+		*s = m
+		return nil
+	}
+	// next attempt to unmarshal reference message structure (slice)
+	var sl []stint
+	if err := json.Unmarshal(data, &sl); err != nil {
+		return err
+	}
+	for i, v := range sl {
+		m[strconv.Itoa(i)] = v
+	}
+	*s = m
+	return nil
 }
 
 type stint struct {
@@ -78,8 +127,33 @@ type trackStatus struct {
 	Message string `json:"Message"`
 }
 
+// driverList is a type allowing for custom ummarshaling of the driver list which can include
+// additional non-driver fields (e.g. _kf:true kvps).
+type driverList map[string]driverListItem
+
+func (dl *driverList) UnmarshalJSON(data []byte) error {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	filteredDriverList := make(map[string]driverListItem)
+	for k, v := range m {
+		if _, err := strconv.Atoi(k); err != nil {
+			continue
+		}
+		var d driverListItem
+		if err := json.Unmarshal(v, &d); err != nil {
+			continue
+		}
+		filteredDriverList[k] = d
+	}
+
+	*dl = filteredDriverList
+	return nil
+}
+
 // driverData represents intrinsic data about an individual driver
-type driverData struct {
+type driverListItem struct {
 	RacingNumber  *string `json:"RacingNumber"`
 	BroadcastName *string `json:"BroadcastName"`
 	FullName      *string `json:"FullName"`
@@ -152,23 +226,57 @@ type sessionInfo struct {
 	Path      *string `json:"Path"`
 }
 
-// referenceSessionData contains a list of all session/track status changes and the corresponding
+// sessionData contains session/track status changes. Change and Reference version of the message
+// are identical except that the changes are represented in a map and the reference is represented
+// as a list. This type handles unmarshaling both reference and change messages into a normalized
+// structure
+type sessionData struct {
+	Series       map[string]sessionDataSeries       `json:"Series"`
+	StatusSeries map[string]sessionDataStatusSeries `json:"StatusSeries"`
+}
+
+func (s *sessionData) UnmarshalJSON(data []byte) error {
+	// first try unmarshalling change message version
+	var change changeSessionData
+	if err := json.Unmarshal(data, &change); err == nil {
+		*s = sessionData(change)
+		return nil
+	}
+	// if that fails try unmarshalling reference message version
+	var ref referenceSessionData
+	if err := json.Unmarshal(data, &ref); err != nil {
+		return err
+	}
+	// convert array of session data into map
+	dataMap := make(map[string]sessionDataSeries)
+	for i, v := range ref.Series {
+		dataMap[strconv.Itoa(i)] = v
+	}
+	s.Series = dataMap
+	// convert array of session status data into map
+	statusMap := make(map[string]sessionDataStatusSeries)
+	for i, v := range ref.StatusSeries {
+		statusMap[strconv.Itoa(i)] = v
+	}
+	s.StatusSeries = statusMap
+	return nil
+}
+
+// referenceSessionData contains a slice of all session/track status changes and the corresponding
 // lap in which the changes occurred (if the session is a race).
 type referenceSessionData struct {
 	Series       []sessionDataSeries       `json:"Series"` // Lap on which the status applies
 	StatusSeries []sessionDataStatusSeries `json:"StatusSeries"`
 }
 
-// changeSessionData contains a map of all sessin/track status changes and the corresponding lap in
-// which the changes occurred (if the session is  race). It is identical to the
-// `referenceSessiondata` type except that the changes are represented in a map as opposed to a list
-// so that changes can be easily merged into a state store.
+// changeSessionData contains a map of all session/track status changes and the corresponding lap in
+// which the changes occurred (if the session is  race).
 type changeSessionData struct {
 	Series       map[string]sessionDataSeries       `json:"Series"`
 	StatusSeries map[string]sessionDataStatusSeries `json:"StatusSeries"`
 }
 
-// sessionDataSeries contains the lap count and qualifying part for sess
+// sessionDataSeries contains the lap count and qualifying part for session data messages.
 type sessionDataSeries struct {
 	UTC            time.Time `json:"Utc"`
 	Lap            *int      `json:"Lap"`
@@ -178,24 +286,41 @@ type sessionDataSeries struct {
 // sessionDataStatuseries contains a session and/or track status series change. These statuses
 // include flags, (virtual) safety cards, etc.
 type sessionDataStatusSeries struct {
-	Utc           time.Time `json:"Utc"`
-	TrackStatus   string    `json:"TrackStatus"`
-	SessionStatus string    `json:"SessionStatus"`
+	UTC           time.Time `json:"Utc"`
+	TrackStatus   *string   `json:"TrackStatus"`
+	SessionStatus *string   `json:"SessionStatus"`
 }
 
-// referenceTimingData represents per-driver live timing data including lap times, gaps, personal/
-// overall best indicators and sector timing data. The only difference between `referenceTimingData`
-// and `changeTimingData` is that sector data is represented as a list in `referenceTimingData`.
-type referenceTimingData struct {
-	Lines map[string]referenceDriverTimingData `json:"Lines"`
+// timingDataMsg represents per-driver live timing data including lap times, gaps, personal/
+// overall best indicators and sector timing data.
+type timingDataMsg struct {
+	Lines driverTimingDataMap `json:"Lines"`
 }
 
-// changeTimingData represents per-driver live timing data including lap times, gaps, personal/
-// overall best indicators and sector timing data. The only difference between `changeTimingData`
-// and `referenceTimingData` is that sector data is represented as a map in `changeTimingData` so
-// that changes can be easily merged in a state store.
-type changeTimingData struct {
-	Lines map[string]changeDriverTimingData `json:"Lines"`
+// drivertimingDataMap enables a custom json unmarshalling that removes non-drivertiming data from
+// the map (e.g. _kf:true kvps)
+type driverTimingDataMap map[string]driverTimingData
+
+func (dt *driverTimingDataMap) UnmarshalJSON(data []byte) error {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+
+	filteredMap := make(map[string]driverTimingData)
+	for k, v := range m {
+		if _, err := strconv.Atoi(k); err != nil {
+			continue
+		}
+		var d driverTimingData
+		if err := json.Unmarshal(v, &d); err != nil {
+			continue
+		}
+		filteredMap[k] = d
+	}
+
+	*dt = filteredMap
+	return nil
 }
 
 // driverTimingData contains lap times, gaps and other live-timing information about a specific
@@ -220,6 +345,9 @@ type driverTimingData struct {
 	NumberOfLaps            *int                 `json:"NumberOfLaps"`
 	KnockedOut              *bool                `json:"KnockedOut"`
 	Cutoff                  *bool                `json:"Cutoff"`
+	Sectors                 driverTimingSectors  `json:"Sectors"`
+	QualifyingStats         driverTimingStats    `json:"Stats"`
+	QualifyingBestLapTimes  driverTimingBestLaps `json:"BestLapTimes"`
 }
 
 type driverTimingInterval struct {
@@ -254,131 +382,86 @@ type driverSpeedTimingData struct {
 	PersonalFastest *bool   `json:"PersonalFastest"`
 }
 
-// referenceDriverTimingData contains driver timing data along with sector timing data in a slice.
-type referenceDriverTimingData struct {
-	driverTimingData
-	Sectors      []sectorTiming        `json:"Sectors"`
-	Stats        []driverTimingStats   `json:"Stats"`
-	BestLapTimes []driverTimingBestLap `json:"BestLapTimes"`
+// driverTimingSectors represents per-sector timing data; Change and Reference version of the
+// message are identical except that the changes are represented in a map and the reference is
+// represented as a list. This type handles unmarshaling both reference and change messages into a
+// normalized structure.
+type driverTimingSectors map[string]sectorTiming
+
+func (dts *driverTimingSectors) UnmarshalJSON(data []byte) error {
+	// first try unmarshalling change message structure
+	var m map[string]sectorTiming
+	if err := json.Unmarshal(data, &m); err == nil {
+		*dts = m
+		return nil
+	}
+	// next try unmarshalling reference message structure
+	var s []sectorTiming
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	// convert slice to map
+	m = make(map[string]sectorTiming)
+	for i, v := range s {
+		m[strconv.Itoa(i)] = v
+	}
+	*dts = m
+	return nil
 }
 
-// changeDriverTimingData contains driver timing data along with sector timing data in a map so
-// that changes can be easily merged into a data store.
-type changeDriverTimingData struct {
-	driverTimingData
-	Sectors      map[string]sectorTiming        `json:"Sectors"`
-	Stats        map[string]driverTimingStats   `json:"Stats"` // Qualifying and Practice encapsulate deltas in 'Stats'
-	BestLapTimes map[string]driverTimingBestLap `json:"BestLapTimes"`
+// driverTimingSectors represents per-sector timing data; Change and Reference version of the
+// message are identical except that the changes are represented in a map and the reference is
+// represented as a list. This type handles unmarshaling both reference and change messages into a
+// normalized structure.
+type driverTimingStats map[string]driverQualifyingTimingStat
+
+func (dts *driverTimingStats) UnmarshalJSON(data []byte) error {
+	// first try unmarshalling change message structure
+	var m map[string]driverQualifyingTimingStat
+	if err := json.Unmarshal(data, &m); err == nil {
+		*dts = m
+		return nil
+	}
+	// next try unmarshalling reference message structure
+	var s []driverQualifyingTimingStat
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	// convert slice to map
+	m = make(map[string]driverQualifyingTimingStat)
+	for i, v := range s {
+		m[strconv.Itoa(i)] = v
+	}
+	*dts = m
+	return nil
 }
 
-type driverTimingStats struct {
+type driverTimingBestLaps map[string]driverTimingBestLap
+
+func (dts *driverTimingBestLaps) UnmarshalJSON(data []byte) error {
+	// first try unmarshalling change message structure
+	var m map[string]driverTimingBestLap
+	if err := json.Unmarshal(data, &m); err == nil {
+		*dts = m
+		return nil
+	}
+	// next try unmarshalling reference message structure
+	var s []driverTimingBestLap
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	// convert slice to map
+	m = make(map[string]driverTimingBestLap)
+	for i, v := range s {
+		m[strconv.Itoa(i)] = v
+	}
+	*dts = m
+	return nil
+}
+
+type driverQualifyingTimingStat struct {
 	TimeDiffToFastest       *string `json:"TimeDiffToFastest"`
 	TimeDiffToPositionAhead *string `json:"TimeDiffToPositionAhead"`
-}
-
-// Convert the session data reference message structure to the change message structure.
-func changeSessionDateFromReference(ref referenceSessionData) changeSessionData {
-	csd := changeSessionData{
-		Series:       make(map[string]sessionDataSeries),
-		StatusSeries: make(map[string]sessionDataStatusSeries),
-	}
-
-	for i, data := range ref.Series {
-		key := strconv.Itoa(i)
-		csd.Series[key] = data
-	}
-
-	for i, data := range ref.StatusSeries {
-		key := strconv.Itoa(i)
-		csd.StatusSeries[key] = data
-	}
-
-	return csd
-}
-
-// Convert the timing data reference message structure to the change message structure.
-func changeTimingDataFromReference(ref referenceTimingData) changeTimingData {
-	ctd := changeTimingData{
-		Lines: make(map[string]changeDriverTimingData),
-	}
-
-	for num, rtd := range ref.Lines {
-		statsMap := make(map[string]driverTimingStats)
-		for i, stat := range rtd.Stats {
-			sessionNum := strconv.Itoa(i)
-			statsMap[sessionNum] = stat
-		}
-		sectorsMap := make(map[string]sectorTiming)
-		for i, sector := range rtd.Sectors {
-			sectorNum := strconv.Itoa(i)
-			sectorsMap[sectorNum] = sector
-		}
-		bestTimesMap := make(map[string]driverTimingBestLap)
-		for i, bestLap := range rtd.BestLapTimes {
-			partNum := strconv.Itoa(i)
-			bestTimesMap[partNum] = bestLap
-		}
-		ctd.Lines[num] = changeDriverTimingData{
-			driverTimingData: driverTimingData{
-				Position:     rtd.Position,
-				ShowPosition: rtd.ShowPosition,
-				RacingNumber: rtd.RacingNumber,
-				Retired:      rtd.Retired,
-				InPit:        rtd.InPit,
-				PitOut:       rtd.PitOut,
-				Stopped:      rtd.Stopped,
-				Status:       rtd.Status,
-				GapToLeader:  rtd.GapToLeader,
-				IntervalToPositionAhead: driverTimingInterval{
-					Value:    rtd.IntervalToPositionAhead.Value,
-					Catching: rtd.IntervalToPositionAhead.Catching,
-				},
-				Speeds: driverTimingSpeeds{
-					FirstIntermediatePoint:  rtd.Speeds.FirstIntermediatePoint,
-					SecondIntermediatePoint: rtd.Speeds.SecondIntermediatePoint,
-					SpeedTrap:               rtd.Speeds.SpeedTrap,
-				},
-				BestLapTime: driverTimingBestLap{
-					Value: rtd.BestLapTime.Value,
-					Lap:   rtd.BestLapTime.Lap,
-				},
-				LastLapTime: driverTimingLastLap{
-					Value:           rtd.LastLapTime.Value,
-					Status:          rtd.LastLapTime.Status,
-					OverallFastest:  rtd.LastLapTime.OverallFastest,
-					PersonalFastest: rtd.LastLapTime.PersonalFastest,
-				},
-				NumberOfLaps: rtd.NumberOfLaps,
-			},
-			Stats:        statsMap,
-			Sectors:      sectorsMap,
-			BestLapTimes: bestTimesMap,
-		}
-	}
-
-	return ctd
-}
-
-// Convert the timing app data reference message structure to the change message structure.
-func changeTimingAppDataFromReference(ref referenceTimingAppData) changeTimingAppData {
-	lines := make(map[string]changeDrivingTimingAppData)
-
-	for driverNumber, rtad := range ref.Lines {
-		// convert stint array in reference message to map structure in change message
-		stints := make(map[string]stint)
-		for i, stint := range rtad.Stints {
-			stints[strconv.Itoa(i)] = stint
-		}
-
-		lines[driverNumber] = changeDrivingTimingAppData{
-			RacingNumber: rtad.RacingNumber,
-			Line:         rtad.Line,
-			GridPos:      rtad.GridPos,
-			Stints:       stints,
-		}
-	}
-
-	return changeTimingAppData{Lines: lines}
 }
 
 // sectorTiming represents timing for 1 of 3 sectors around the crcuit for a specific driver on a
@@ -397,15 +480,4 @@ type sectorTiming struct {
 type lapCount struct {
 	CurrentLap *int `json:"CurrentLap"`
 	TotalLaps  *int `json:"TotalLaps"`
-}
-
-// f1ChangeMessage represents a 'change' message sent on the websocket connection from the server.
-// It is a delta between the reference data and any other preceeding change messages.
-type f1ChangeMessage struct {
-	ChangeSetId string `json:"C"`
-	Messages    []struct {
-		Hub       string `json:"H"`
-		Message   string `json:"M"`
-		Arguments []any  `json:"A"`
-	} `json:"M"`
 }

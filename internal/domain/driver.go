@@ -6,6 +6,7 @@ const (
 	TireCompoundHard         TireCompound = "HARD"
 	TireCompoundIntermediate TireCompound = "INTERMEDIATE"
 	TireCompoundFullWet      TireCompound = "WET"
+	TireCompoundTest         TireCompound = "TEST"
 	TireCompoundUnknown      TireCompound = "UNKNOWN"
 )
 
@@ -18,6 +19,7 @@ func NewDriver(number string) Driver {
 			ShowPosition: true,
 			Sectors:      make([]Sector, 3),
 			BestLapTimes: make([]string, 3),
+			TireCompound: TireCompoundUnknown,
 		},
 	}
 }

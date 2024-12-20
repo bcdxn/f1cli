@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -285,74 +284,70 @@ func (c Client) websocketURL() (*url.URL, error) {
 	return u, nil
 }
 
-var (
-	// The F1 API returns a mixed-type map which makes ummarshalling to strongly typed structs
-	// challenging, so we just strip the offending property from the message string using the kfRe
-	// regular expression.
-	kfRe = regexp.MustCompile(`,\s*"_kf":\s*(?:true|false)(,[^}])?`)
-)
-
 // processMessage checks the message coming the F1 LiveTiming Client to see if it is a 'change'
 // message or a 'reference' message and handles them appropriately, transforming the message into
 // 1 to none or many messages that can be written to the client channels.
 func (c *Client) processMessage(msg []byte) {
 	// Always try to parse a change message first since there is only 1 reference message and
 	// tens of thousands of change messages over the course of a session
-	var changeData f1ChangeMessage
-	err := json.Unmarshal(msg, &changeData)
-	if err == nil && len(changeData.ChangeSetId) > 0 && len(changeData.Messages) > 0 {
+	var f1msg f1Message
+	err := json.Unmarshal(msg, &f1msg)
+	if err != nil {
+		c.logger.Warn("unknown message format", "msg", string(msg), "err", err)
+		return
+	}
+
+	if len(f1msg.Changes) > 0 {
 		c.logger.Debug("received change data message")
-		c.processChangeMessage(changeData)
-		return
+		c.processChangeMessage(f1msg.Changes)
 	}
-	// Next try to parse a reference data message
-	referenceMsg := kfRe.ReplaceAllString(string(msg), "")
-	var referenceData f1ReferenceMessage
-	err = json.Unmarshal([]byte(referenceMsg), &referenceData)
-	if err == nil && referenceData.MessageInterval != "" {
+
+	if len(f1msg.Reference) > 0 {
 		c.logger.Debug("received reference data message")
-		c.logger.Debug(string(msg))
-		c.processReferenceMessage(referenceData)
+		c.processReferenceMessage(f1msg.Reference)
 		return
 	}
-	// The message wasn't a known 'change' or 'reference' message type
-	c.logger.Debug("unhandled message", "msg", msg)
 }
 
 // processChangeMessage handles an incoming change message from the F1 Live Timing API; change
 // messages represent deltas to the original reference message and all preceeding change messages.
 // Once processed, a simplified event is emitted for use by the TUI.
-func (c *Client) processChangeMessage(changeMessage f1ChangeMessage) {
+func (c *Client) processChangeMessage(changesRawMessage []byte) {
+	var changesMsg []f1ChangeMessage
+	err := json.Unmarshal(changesRawMessage, &changesMsg)
+	if err != nil {
+		c.logger.Warn("error unmarshalling change message", "msg", string(changesRawMessage), "err", err)
+		return
+	}
 	meetingUpdating := false
 	driversUpdated := false
 	raceCtrlMsgsUpdated := false
-	for _, m := range changeMessage.Messages {
-		if m.Hub == "Streaming" && m.Message == "feed" && len(m.Arguments) == 3 {
+	for _, m := range changesMsg {
+		if len(m.Arguments) == 3 {
 			var s, d, r bool
-			msgType := m.Arguments[0]
-			msgData := m.Arguments[1]
-			// Marshal the data part of the message so that we can unmarshal into strongly typed messages
-			// based on the messageType value.
-			msg, err := json.Marshal(msgData)
+			var msgType string
+			err := json.Unmarshal(m.Arguments[0], &msgType)
 			if err != nil {
-				c.logger.Warn("unable to marshal msg", "msg", msg)
-				return
+				c.logger.Warn("invalid message type argument", "arg", string(m.Arguments[0]))
+				continue
 			}
+			msgData := m.Arguments[1]
+
 			switch msgType {
 			case "DriverList":
-				s, d, r = c.updateDriverIntrinsicData(c.ummarshalDriverListMsg(msg))
+				s, d, r = c.updateDriverList(c.unmarshalDriverListMsg(msgData))
 			case "TimingData":
-				s, d, r = c.updateDriverTimingData(c.unmarshalDriverTimingDataMsg(msg))
+				s, d, r = c.updateTimingData(c.unmarshalTimingDataMsg(msgData))
 			case "SessionInfo":
-				s, d, r = c.updateSessionInfo(c.unmarshalSessionInfoMsg(msg))
+				s, d, r = c.updateSessionInfo(c.unmarshalSessionInfoMsg(msgData))
 			case "SessionData":
-				s, d, r = c.updateSessionData(c.unmarshalSessionDataMsg(msg))
-			case "LapCount":
-				s, d, r = c.updateLapCount(c.unmarshalLapCountMsg(msg))
-			case "TimingAppData":
-				s, d, r = c.updateTimingAppData(c.unmarshalTimingAppDataMsg(msg))
+				s, d, r = c.updateSessionData(c.unmarshalSessionDataMsg(msgData))
+			// case "LapCount":
+			// 	s, d, r = c.updateLapCount(c.unmarshalLapCountMsg(msgData))
+			// case "TimingAppData":
+			// 	s, d, r = c.updateTimingAppData(c.unmarshalTimingAppDataMsg(msg))
 			default:
-				c.logger.Warn("unknown change message", "type", msgType, "msg", msg)
+				c.logger.Warn("unknown change message", "type", msgType, "msg", string(msgData))
 			}
 
 			if s {
@@ -364,6 +359,8 @@ func (c *Client) processChangeMessage(changeMessage f1ChangeMessage) {
 			if r {
 				raceCtrlMsgsUpdated = true
 			}
+		} else {
+			c.logger.Warn("invalid length of change message arguments", "args", m.Arguments)
 		}
 	}
 
@@ -378,17 +375,24 @@ func (c *Client) processChangeMessage(changeMessage f1ChangeMessage) {
 	}
 }
 
-func (c *Client) processReferenceMessage(referenceMessage f1ReferenceMessage) {
-	c.updateSessionInfo(referenceMessage.Reference.SessionInfo)
-	c.updateSessionData(
-		changeSessionDateFromReference(referenceMessage.Reference.SessionData),
-	)
-	c.updateDriverIntrinsicData(referenceMessage.Reference.DriverList)
-	c.updateLapCount(referenceMessage.Reference.LapCount)
+func (c *Client) processReferenceMessage(referenceRawMsg []byte) {
+	var refMsg f1ReferenceMessage
+	err := json.Unmarshal(referenceRawMsg, &refMsg)
+	if err != nil {
+		c.logger.Warn("error unmarshalling reference message", "msg", string(referenceRawMsg), "err", err)
+		return
+	}
 
+	c.updateSessionInfo(c.unmarshalSessionInfoMsg(refMsg.SessionInfo))
+	c.updateSessionData(c.unmarshalSessionDataMsg(refMsg.SessionData))
+	c.updateDriverList(c.unmarshalDriverListMsg(refMsg.DriverList))
+	c.updateLapCount(c.unmarshalLapCountMsg(refMsg.LapCount))
+	c.updateTimingData(c.unmarshalTimingDataMsg(refMsg.TimingData))
+	c.updateTimingAppData(c.unmarshalTimingAppDataMsg(refMsg.TimingAppData))
+	// The reference message always updates all channels
 	c.meetingCh <- c.meeting
 	c.writeDriversToChan()
-	c.writeRaceCtrlMsgsToChan()
+	// c.writeRaceCtrlMsgsToChan()
 }
 
 /* Message Unmarshalers
@@ -409,8 +413,8 @@ func (c *Client) unmarshalSessionInfoMsg(msg []byte) sessionInfo {
 }
 
 // unmarshalSessionData converts the websocket message to a strongly typed struct.
-func (c *Client) unmarshalSessionDataMsg(msg []byte) changeSessionData {
-	var s changeSessionData
+func (c *Client) unmarshalSessionDataMsg(msg []byte) sessionData {
+	var s sessionData
 	err := json.Unmarshal(msg, &s)
 	if err != nil {
 		c.logger.Warn("session data msg in unknown format", "msg", string(msg))
@@ -419,13 +423,14 @@ func (c *Client) unmarshalSessionDataMsg(msg []byte) changeSessionData {
 }
 
 // ummarshalDriverListMsg converts the websocket message to a strongly typed map of structs.
-func (c *Client) ummarshalDriverListMsg(msg []byte) map[string]driverData {
-	var d map[string]driverData
-	err := json.Unmarshal(msg, &d)
+func (c *Client) unmarshalDriverListMsg(msg []byte) driverList {
+	var drivers driverList
+	err := json.Unmarshal(msg, &drivers)
 	if err != nil {
 		c.logger.Warn("driver data msg in unknown format", "msg", string(msg))
 	}
-	return d
+
+	return drivers
 }
 
 // unmarshalLapCountMsg converts the websocket message to a strongly typed struct.
@@ -438,19 +443,20 @@ func (c *Client) unmarshalLapCountMsg(msg []byte) lapCount {
 	return lc
 }
 
-// unmarshalDriverTimingDataMsg converts the websocket message to a strongly typed struct.
-func (c *Client) unmarshalDriverTimingDataMsg(msg []byte) changeTimingData {
-	var timingDataMsg changeTimingData
+// unmarshalTimingDataMsg converts the websocket message to a strongly typed struct.
+func (c *Client) unmarshalTimingDataMsg(msg []byte) timingDataMsg {
+	var timingDataMsg timingDataMsg
 	err := json.Unmarshal(msg, &timingDataMsg)
 	if err != nil {
 		c.logger.Warn("timing data msg in unknown format", "msg", string(msg))
 	}
+
 	return timingDataMsg
 }
 
 // unmarshalTimingAppDataMsg converts the websocket message to a strongly typed struct.
-func (c *Client) unmarshalTimingAppDataMsg(msg []byte) changeTimingAppData {
-	var tad changeTimingAppData
+func (c *Client) unmarshalTimingAppDataMsg(msg []byte) timingAppData {
+	var tad timingAppData
 	err := json.Unmarshal(msg, &tad)
 	if err != nil {
 		c.logger.Warn("timing app data msg in unknown format", "msg", string(msg))
@@ -485,10 +491,21 @@ func (c *Client) updateSessionInfo(session sessionInfo) (meetingUpdating, driver
 
 // updateSessionData converts a SessionData msg from the F1 LiveTiming API to the `Session` domain
 // model and writes the full state of the meeting/session for consumers to read.
-func (c *Client) updateSessionData(session changeSessionData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+func (c *Client) updateSessionData(session sessionData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
 	// this function always updates session
 	meetingUpdating = true
+	// update the session status to the latest/current status
+	statusKeys := make([]string, 0)
+	for key := range session.StatusSeries {
+		statusKeys = append(statusKeys, key)
+	}
+	// Access the status messages in order so that we end up on the latest entry
+	sort.Strings(statusKeys)
+	for _, key := range statusKeys {
+		setSessionStatus(&c.meeting, session.StatusSeries[key].SessionStatus)
+	}
 
+	// Update the session part to the latest/current session part
 	seriesKeys := make([]string, 0)
 	for key := range session.Series {
 		seriesKeys = append(seriesKeys, key)
@@ -503,7 +520,7 @@ func (c *Client) updateSessionData(session changeSessionData) (meetingUpdating, 
 }
 
 // updateDriverIntrinsicData updates the intrinsic driver data (and occassionally position).
-func (c *Client) updateDriverIntrinsicData(driverDataMsg map[string]driverData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+func (c *Client) updateDriverList(driverDataMsg map[string]driverListItem) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
 	// this function always updates drivers
 	driversUpdated = true
 	// update data for each driver to the drivers map
@@ -540,7 +557,7 @@ func (c *Client) updateLapCount(lc lapCount) (meetingUpdating, driversUpdated, r
 }
 
 // updateDriverTimingData updates driver timing and position data.
-func (c *Client) updateDriverTimingData(timingDataMsg changeTimingData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+func (c *Client) updateTimingData(timingDataMsg timingDataMsg) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
 	// this function always updates drivers
 	driversUpdated = true
 	// add data for each driver to the drivers map
@@ -580,7 +597,7 @@ func (c *Client) updateDriverTimingData(timingDataMsg changeTimingData) (meeting
 }
 
 // updateTimingAppData updates driver stint and position data.
-func (c *Client) updateTimingAppData(tad changeTimingAppData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+func (c *Client) updateTimingAppData(tad timingAppData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
 	// thils function always updates drivers
 	driversUpdated = true
 	for driverNum, timingAppData := range tad.Lines {
@@ -620,6 +637,7 @@ func (c *Client) updateTimingAppData(tad changeTimingAppData) (meetingUpdating, 
 // Because maps are not concurrency-safe, we'll copy the map before writing it to the channel that
 // can be read by concurrent goroutines.
 func (c *Client) writeDriversToChan() {
+	fmt.Println("writing driver timing data")
 	cpy := make(map[string]domain.Driver)
 
 	for key, val := range c.drivers {
@@ -674,7 +692,7 @@ func setPosition(driver *domain.Driver, pos *int) {
 	}
 }
 
-func setGaps(driver *domain.Driver, meeting domain.Meeting, data changeDriverTimingData) {
+func setGaps(driver *domain.Driver, meeting domain.Meeting, data driverTimingData) {
 	if driver.TimingData.Position == 1 {
 		driver.TimingData.IntervalGap = ""
 		driver.TimingData.LeaderGap = ""
@@ -683,19 +701,23 @@ func setGaps(driver *domain.Driver, meeting domain.Meeting, data changeDriverTim
 		// interested the most recent qualifying part, so we iterate through (the list is in order) and
 		// overwrite the gaps for each available qualifying part ending with the most recent.
 		parts := make([]string, 0, 3)
-		for part := range data.Stats {
+		for part := range data.QualifyingStats {
 			parts = append(parts, part)
 		}
 		sort.Strings(parts)
 		for _, part := range parts {
-			driver.TimingData.LeaderGap = *data.Stats[part].TimeDiffToFastest
-			driver.TimingData.IntervalGap = *data.Stats[part].TimeDiffToPositionAhead
+			if data.QualifyingStats[part].TimeDiffToFastest != nil {
+				driver.TimingData.LeaderGap = *data.QualifyingStats[part].TimeDiffToFastest
+			}
+			if data.QualifyingStats[part].TimeDiffToPositionAhead != nil {
+				driver.TimingData.IntervalGap = *data.QualifyingStats[part].TimeDiffToPositionAhead
+			}
 		}
 	} else {
-		if data.IntervalToPositionAhead.Value != nil && *data.IntervalToPositionAhead.Value != "" {
+		if data.IntervalToPositionAhead.Value != nil {
 			driver.TimingData.IntervalGap = *data.IntervalToPositionAhead.Value
 		}
-		if data.GapToLeader != nil && *data.GapToLeader != "" {
+		if data.GapToLeader != nil {
 			driver.TimingData.LeaderGap = *data.GapToLeader
 		}
 	}
@@ -737,7 +759,22 @@ func setIsRetired(driver *domain.Driver, out *bool, status *int) {
 
 func setTireCompound(driver *domain.Driver, compound *string) {
 	if compound != nil {
-		driver.TimingData.TireCompound = domain.TireCompound(*compound)
+		switch *compound {
+		case "SOFT":
+			driver.TimingData.TireCompound = domain.TireCompoundSoft
+		case "MEDIUM":
+			driver.TimingData.TireCompound = domain.TireCompoundMedium
+		case "HARD":
+			driver.TimingData.TireCompound = domain.TireCompoundMedium
+		case "INTERMEDIATE":
+			driver.TimingData.TireCompound = domain.TireCompoundIntermediate
+		case "WET":
+			driver.TimingData.TireCompound = domain.TireCompoundFullWet
+		case "TEST":
+			driver.TimingData.TireCompound = domain.TireCompoundTest
+		default:
+			driver.TimingData.TireCompound = domain.TireCompoundUnknown
+		}
 	}
 }
 
@@ -806,17 +843,17 @@ func setSectors(driver *domain.Driver, meeting *domain.Meeting, sectors map[stri
 	return meetingUpdating
 }
 
-func setBestLapInPart(driver *domain.Driver, data changeDriverTimingData) {
+func setBestLapInPart(driver *domain.Driver, data driverTimingData) {
 	// Sort session parts before
 	partNums := make([]string, 0, 3)
-	for partNum := range data.BestLapTimes {
+	for partNum := range data.QualifyingBestLapTimes {
 		partNums = append(partNums, partNum)
 	}
 	sort.Strings(partNums)
 	for _, partNum := range partNums {
 		i, _ := strconv.Atoi(partNum)
-		if data.BestLapTimes[partNum].Value != nil {
-			driver.TimingData.BestLapTimes[i] = *data.BestLapTimes[partNum].Value
+		if data.QualifyingBestLapTimes[partNum].Value != nil {
+			driver.TimingData.BestLapTimes[i] = *data.QualifyingBestLapTimes[partNum].Value
 		}
 	}
 }
@@ -889,7 +926,31 @@ func setSessionEndDate(meeting *domain.Meeting, end *string) {
 
 func setSessionType(meeting *domain.Meeting, t *string) {
 	if t != nil {
-		meeting.Session.Type = domain.SessionType(*t)
+		switch *t {
+		case "Test":
+			meeting.Session.Type = domain.SessionTypeTest
+		case "Practice":
+			meeting.Session.Type = domain.SessionTypePractice
+		case "Qualifying":
+			meeting.Session.Type = domain.SessionTypeQualifying
+		case "Race":
+			meeting.Session.Type = domain.SessionTypeRace
+		case "Unknown":
+			meeting.Session.Type = domain.SessionTypeUnknown
+		}
+	}
+}
+
+func setSessionStatus(meeting *domain.Meeting, s *string) {
+	if s != nil {
+		switch *s {
+		case "Started":
+			meeting.Session.Status = domain.SessionStatusStarted
+		case "Ended":
+			meeting.Session.Status = domain.SessionStatusEnded
+		case "Finished":
+			meeting.Session.Status = domain.SessionStatusEnded
+		}
 	}
 }
 

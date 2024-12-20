@@ -1,0 +1,21 @@
+{
+  "C": "d-C8278ED2-B,0|DJm,0|DJn,11|U,18E|Q,1299|X,1294|F,5|G,45|Bp,0|e,3C|c,9D|I,4F|f,3|T,35|Y,16|a,2|Z,B|E,1|d,1016",
+  "M": [
+    {
+      "H": "Streaming",
+      "M": "feed",
+      "A": [
+        "SessionData",
+        {
+          "StatusSeries": {
+            "1": {
+              "Utc": "2024-12-08T13:03:35.033Z",
+              "SessionStatus": "Started"
+            }
+          }
+        },
+        "2024-12-08T13:03:35.033Z"
+      ]
+    }
+  ]
+}

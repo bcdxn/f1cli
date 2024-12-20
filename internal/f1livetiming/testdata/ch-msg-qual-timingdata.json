@@ -1,0 +1,206 @@
+{
+  "C": "d-C41746DD-B,0|EDa,0|EDb,11|E,219|BU,19A6|BV,19D4|BW,8|BX,87|BY,0|K,3A3|Q,2D8|BN,72|BP,2|N,A0|BO,9|L,3|M,A|O,0|P,345A",
+  "M": [
+    {
+      "H": "Streaming",
+      "M": "feed",
+      "A": [
+        "TimingData",
+        {
+          "Lines": {
+            "81": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.338"
+                }
+              },
+              "Line": 8,
+              "Position": "8"
+            },
+            "4": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.380"
+                }
+              },
+              "Line": 9,
+              "Position": "9"
+            },
+            "44": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.585"
+                }
+              }
+            },
+            "1": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.214"
+                }
+              },
+              "Line": 4,
+              "Position": "4"
+            },
+            "55": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.185"
+                }
+              },
+              "Line": 3,
+              "Position": "3"
+            },
+            "63": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.491"
+                }
+              }
+            },
+            "27": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.420",
+                  "TimeDifftoPositionAhead": "+0.040"
+                }
+              }
+            },
+            "20": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.330"
+                }
+              },
+              "Line": 7,
+              "Position": "7"
+            },
+            "16": {
+              "BestLapTimes": {
+                "0": {
+                  "Value": "1:23.302",
+                  "Lap": 5
+                }
+              },
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": ""
+                }
+              },
+              "Line": 1,
+              "Position": "1",
+              "NumberOfLaps": 6,
+              "Sectors": {
+                "2": {
+                  "Value": "30.214"
+                }
+              },
+              "Speeds": {
+                "FL": {
+                  "Value": "219"
+                }
+              },
+              "BestLapTime": {
+                "Value": "1:23.302",
+                "Lap": 5
+              },
+              "LastLapTime": {
+                "Value": "1:23.302",
+                "OverallFastest": true,
+                "PersonalFastest": true
+              }
+            },
+            "11": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.257"
+                }
+              },
+              "Line": 6,
+              "Position": "6"
+            },
+            "22": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.433"
+                }
+              }
+            },
+            "23": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.519"
+                }
+              }
+            },
+            "10": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.246"
+                }
+              },
+              "Line": 5,
+              "Position": "5"
+            },
+            "61": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.830"
+                }
+              }
+            },
+            "14": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.620"
+                }
+              }
+            },
+            "77": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.179",
+                  "TimeDifftoPositionAhead": "+0.179"
+                }
+              },
+              "Line": 2,
+              "Position": "2",
+              "LastLapTime": {
+                "OverallFastest": false
+              }
+            },
+            "30": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.431"
+                }
+              }
+            },
+            "18": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.427"
+                }
+              }
+            },
+            "24": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.578"
+                }
+              }
+            },
+            "43": {
+              "Stats": {
+                "0": {
+                  "TimeDiffToFastest": "+0.610"
+                }
+              }
+            }
+          }
+        },
+        "2024-12-07T14:18:04.25Z"
+      ]
+    }
+  ]
+}

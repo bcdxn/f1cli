@@ -5,10 +5,14 @@ import (
 )
 
 const (
-	SessionTypeTest       SessionType = "Test"
-	SessionTypePractice   SessionType = "Practice"
-	SessionTypeQualifying SessionType = "Qualifying"
-	SessionTypeRace       SessionType = "Race"
+	SessionTypeTest       SessionType   = "TEST"
+	SessionTypePractice   SessionType   = "PRACTICE"
+	SessionTypeQualifying SessionType   = "QUALIFYING"
+	SessionTypeRace       SessionType   = "RACE"
+	SessionTypeUnknown    SessionType   = "UNKNOWN"
+	SessionStatusPending  SessionStatus = "PENDING"
+	SessionStatusStarted  SessionStatus = "STARTED"
+	SessionStatusEnded    SessionStatus = "ENDED"
 )
 
 // NewMeeting returns a new instance of a meeting which represents data about a race weekend
@@ -17,6 +21,8 @@ const (
 func NewMeeting() Meeting {
 	return Meeting{
 		Session: Session{
+			Type:               SessionTypeUnknown,
+			Status:             SessionStatusPending,
 			GMTOffset:          "+0000",
 			FastestSectorOwner: make([]string, 3),
 		},
@@ -25,6 +31,9 @@ func NewMeeting() Meeting {
 
 // The types of sessions of within a race weekend, e.g.: Practice, Qualifying, Race, etc.
 type SessionType string
+
+// The enumerated session statuses
+type SessionStatus string
 
 // Meeting represents data about the race weekend event. This data applies to all of the sessions
 // within a race weekend.
@@ -42,14 +51,15 @@ type Meeting struct {
 // Session represents a specific session within a meeting, e.g.: Practice 1, Qualifying, Race
 type Session struct {
 	Type               SessionType
-	Name               string    // The name of the session, e.g.: "Practice 1", "Race", etc.
-	StartDate          time.Time // The start of the session
-	EndDate            time.Time // The end time of the session - will be zerovalue until session has ended
-	GMTOffset          string    // GMTOffset is the track-timezone delta with GMT/UTC
-	FastestLapOwner    string    // FastestLapOwner is the number of the driver that has the fastest lap in the session
-	FastestLapTime     string    // FastestLapTime is the time of the fastest lap of the session
-	FastestSectorOwner []string  // The owner of the fastest time in each sector
-	CurrentLap         int       // The current lead lap (only applicable for races)
-	TotalLaps          int       // The total number of planned laps (only applicable for races)
-	Part               int       // Part 0-based index, indicating the current part multi-part sessions, e.g.: Qualifying
+	Name               string        // The name of the session, e.g.: "Practice 1", "Race", etc.
+	Status             SessionStatus // The pending, started, ended, etc. status of the session
+	StartDate          time.Time     // The start of the session
+	EndDate            time.Time     // The end time of the session - will be zerovalue until session has ended
+	GMTOffset          string        // GMTOffset is the track-timezone delta with GMT/UTC
+	FastestLapOwner    string        // FastestLapOwner is the number of the driver that has the fastest lap in the session
+	FastestLapTime     string        // FastestLapTime is the time of the fastest lap of the session
+	FastestSectorOwner []string      // The owner of the fastest time in each sector
+	CurrentLap         int           // The current lead lap (only applicable for races)
+	TotalLaps          int           // The total number of planned laps (only applicable for races)
+	Part               int           // Part 0-based index, indicating the current part multi-part sessions, e.g.: Qualifying
 }

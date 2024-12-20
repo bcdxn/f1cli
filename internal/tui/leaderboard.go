@@ -132,6 +132,7 @@ func viewHeader(l Leaderboard) string {
 
 func viewTable(l Leaderboard) string {
 	t := ""
+	l.logger.Error("session type!", "type", l.meeting.Session.Type)
 	switch l.meeting.Session.Type {
 	case domain.SessionTypeQualifying:
 		return viewQualifyingTable(l)
