@@ -1,5 +1,7 @@
 package domain
 
+import "strconv"
+
 const (
 	TireCompoundSoft         TireCompound = "SOFT"
 	TireCompoundMedium       TireCompound = "MEDIUM"
@@ -10,6 +12,13 @@ const (
 	TireCompoundUnknown      TireCompound = "UNKNOWN"
 )
 
+const (
+	SectorStatusInactive        SectorStatus = 0
+	SectorStatusPersonalBest    SectorStatus = 1
+	SectorStatusOverallBest     SectorStatus = 2
+	SectorStatusNotPersonalBest SectorStatus = 3
+)
+
 // NewDriver returns a new instance of a driver as modeled per the domain with fields initialized
 // to allow safe access (e.g. slices of appropriate length to prevent out of bounds indexing).
 func NewDriver(number string) Driver {
@@ -17,15 +26,33 @@ func NewDriver(number string) Driver {
 		Number: number,
 		TimingData: DriverTimingData{
 			ShowPosition: true,
-			Sectors:      make([]Sector, 3),
+			Sectors:      newSectorMap(),
 			BestLapTimes: make([]string, 3),
 			TireCompound: TireCompoundUnknown,
 		},
 	}
 }
 
+func newSectorMap() map[string]Sector {
+	m := make(map[string]Sector, 3)
+	for i := 0; i < 3; i++ {
+		m[strconv.Itoa(i)] = NewSector()
+	}
+	return m
+}
+
+func NewSector() Sector {
+	return Sector{
+		Status:   SectorStatusInactive,
+		Segments: make(map[string]Segment),
+	}
+}
+
 // TireCompound represents one of the official tire compound types used in a race weekend.
 type TireCompound string
+
+// SectorStatus represents the status of an invidvidual sector for a driver on a lap.
+type SectorStatus int
 
 // Driver domain model represent intrinsic data about a driver as well as updates to live-timing
 // data like grid position, gaps, etc.
@@ -58,7 +85,7 @@ type DriverTimingData struct {
 	ShowPosition bool         // The driver is out of the session due to crash, mechanical failure, etc.
 	IsPitOut     bool         // PitOut indicates if the driver is on an outlap
 	// Sector times
-	Sectors []Sector
+	Sectors map[string]Sector
 	// Race-specific data
 	NumberOfLaps int
 	IsRetired    bool // The driver is out of the session due to crash, mechanical failure, etc.
@@ -70,8 +97,12 @@ type DriverTimingData struct {
 
 // Sector represents timing data about individual sectors around the lap.
 type Sector struct {
-	Time           string
-	IsPersonalBest bool
-	IsOverallBest  bool
-	IsActive       bool
+	Time     string
+	Status   SectorStatus
+	Segments map[string]Segment
+}
+
+// Segment represents timing information about the individual segments within a sector.
+type Segment struct {
+	Status SectorStatus
 }

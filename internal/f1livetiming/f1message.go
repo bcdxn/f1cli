@@ -13,6 +13,11 @@ const (
 	// statusLostPlaces                = 8256
 	// statusWithinVSCDelta            = 64
 	// statusInPit                     = 80
+
+	yellowSegment = 2048
+	greenSegment  = 2049
+	purpleSegment = 2051
+	pitSegment    = 2064
 )
 
 // f1Message represents a websocket message from the F1 Live Timing API. It comes in two primary
@@ -390,7 +395,7 @@ type driverTimingSectors map[string]sectorTiming
 
 func (dts *driverTimingSectors) UnmarshalJSON(data []byte) error {
 	// first try unmarshalling change message structure
-	var m map[string]sectorTiming
+	m := make(map[string]sectorTiming)
 	if err := json.Unmarshal(data, &m); err == nil {
 		*dts = m
 		return nil
@@ -401,7 +406,6 @@ func (dts *driverTimingSectors) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	// convert slice to map
-	m = make(map[string]sectorTiming)
 	for i, v := range s {
 		m[strconv.Itoa(i)] = v
 	}
@@ -467,12 +471,42 @@ type driverQualifyingTimingStat struct {
 // sectorTiming represents timing for 1 of 3 sectors around the crcuit for a specific driver on a
 // particular lap.
 type sectorTiming struct {
-	Stopped       *bool   `json:"Stopped"`
-	Value         *string `json:"Value"`
-	Status        *int    `json:"Status"`
-	OverallBest   *bool   `json:"OverallFastest"`
-	PersonalBest  *bool   `json:"PersonalFastest"`
-	PreviousValue *string `json:"PreviousValue"`
+	Stopped       *bool                `json:"Stopped"`
+	Value         *string              `json:"Value"`
+	Status        *int                 `json:"Status"`
+	OverallBest   *bool                `json:"OverallFastest"`
+	PersonalBest  *bool                `json:"PersonalFastest"`
+	PreviousValue *string              `json:"PreviousValue"`
+	Segments      segmentTimingDataMap `json:"Segments"`
+}
+
+// segmentTimingDataMap is a type alias for a map of segment timing data items that allows for
+// custom unmarshalling logic to handle the different structures between reference and change
+// messages.
+type segmentTimingDataMap map[string]segmentTimingData
+
+func (stdm *segmentTimingDataMap) UnmarshalJSON(data []byte) error {
+	m := make(map[string]segmentTimingData)
+	// first try unmarshalling change message structure
+	if err := json.Unmarshal(data, &m); err == nil {
+		*stdm = m
+		return nil
+	}
+	// next try unmarshalling reference message structure
+	s := make([]segmentTimingData, 0, 5)
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	// convert slice to map
+	for i, v := range s {
+		m[strconv.Itoa(i)] = v
+	}
+	*stdm = m
+	return nil
+}
+
+type segmentTimingData struct {
+	Status *int `json:"Status"`
 }
 
 // lapCount represents the latest lap information of the session, including the `CurrentLap` of the

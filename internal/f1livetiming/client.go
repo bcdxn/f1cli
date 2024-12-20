@@ -16,6 +16,7 @@ import (
 
 	"github.com/bcdxn/f1cli/internal/domain"
 	"github.com/coder/websocket"
+	"github.com/qdm12/reprint"
 )
 
 // New returns a new F1 LiveTiming API Client.
@@ -342,10 +343,10 @@ func (c *Client) processChangeMessage(changesRawMessage []byte) {
 				s, d, r = c.updateSessionInfo(c.unmarshalSessionInfoMsg(msgData))
 			case "SessionData":
 				s, d, r = c.updateSessionData(c.unmarshalSessionDataMsg(msgData))
-			// case "LapCount":
-			// 	s, d, r = c.updateLapCount(c.unmarshalLapCountMsg(msgData))
-			// case "TimingAppData":
-			// 	s, d, r = c.updateTimingAppData(c.unmarshalTimingAppDataMsg(msg))
+			case "LapCount":
+				s, d, r = c.updateLapCount(c.unmarshalLapCountMsg(msgData))
+			case "TimingAppData":
+				s, d, r = c.updateTimingAppData(c.unmarshalTimingAppDataMsg(msgData))
 			default:
 				c.logger.Warn("unknown change message", "type", msgType, "msg", string(msgData))
 			}
@@ -365,7 +366,7 @@ func (c *Client) processChangeMessage(changesRawMessage []byte) {
 	}
 
 	if meetingUpdating {
-		c.meetingCh <- c.meeting
+		c.writeMeetingToChan()
 	}
 	if driversUpdated {
 		c.writeDriversToChan()
@@ -579,7 +580,7 @@ func (c *Client) updateTimingData(timingDataMsg timingDataMsg) (meetingUpdating,
 		setIsKnockedOut(&driver, data.KnockedOut)
 		setIsRetired(&driver, data.Retired, data.Status)
 		setNumberOfLaps(&driver, data.NumberOfLaps)
-		if updated := setSectors(&driver, &c.meeting, data.Sectors); updated {
+		if updated := setSectors(&driver, c.meeting, data.Sectors); updated {
 			meetingUpdating = true
 		}
 		// Set the Pit status _after_ setting sectors, because these functions may overwrite sector
@@ -603,7 +604,7 @@ func (c *Client) updateTimingAppData(tad timingAppData) (meetingUpdating, driver
 	for driverNum, timingAppData := range tad.Lines {
 		// if multiple stints are given (e.g. in the reference message) we'll iterate through them,
 		// taking the stint with the largest key (which are numbers indicating the order)
-		stints := make([]string, 0, 3)
+		stints := make([]string, 0)
 		for stintNum := range timingAppData.Stints {
 			stints = append(stints, stintNum)
 		}
@@ -618,7 +619,7 @@ func (c *Client) updateTimingAppData(tad timingAppData) (meetingUpdating, driver
 
 		driver, ok := c.drivers[driverNum]
 		if !ok {
-			c.logger.Error("drivre not found", "num", driverNum)
+			c.logger.Error("driver not found", "num", driverNum)
 			driver = domain.NewDriver(driverNum)
 		}
 		if len(timingAppData.Stints) > 0 {
@@ -634,15 +635,21 @@ func (c *Client) updateTimingAppData(tad timingAppData) (meetingUpdating, driver
 	return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
 }
 
+// writeMeetingToChan writes  a copy of the meeting to ensure concurrency safety between goroutines.
+func (c *Client) writeMeetingToChan() {
+	var cpy domain.Meeting
+
+	reprint.FromTo(&c.meeting, &cpy)
+
+	c.meetingCh <- cpy
+}
+
 // Because maps are not concurrency-safe, we'll copy the map before writing it to the channel that
 // can be read by concurrent goroutines.
 func (c *Client) writeDriversToChan() {
-	fmt.Println("writing driver timing data")
-	cpy := make(map[string]domain.Driver)
+	var cpy map[string]domain.Driver
 
-	for key, val := range c.drivers {
-		cpy[key] = val
-	}
+	reprint.FromTo(&c.drivers, &cpy)
 
 	c.driversCh <- cpy
 }
@@ -706,18 +713,18 @@ func setGaps(driver *domain.Driver, meeting domain.Meeting, data driverTimingDat
 		}
 		sort.Strings(parts)
 		for _, part := range parts {
-			if data.QualifyingStats[part].TimeDiffToFastest != nil {
+			if data.QualifyingStats[part].TimeDiffToFastest != nil && *data.QualifyingStats[part].TimeDiffToFastest != "" {
 				driver.TimingData.LeaderGap = *data.QualifyingStats[part].TimeDiffToFastest
 			}
-			if data.QualifyingStats[part].TimeDiffToPositionAhead != nil {
+			if data.QualifyingStats[part].TimeDiffToPositionAhead != nil && *data.QualifyingStats[part].TimeDiffToPositionAhead != "" {
 				driver.TimingData.IntervalGap = *data.QualifyingStats[part].TimeDiffToPositionAhead
 			}
 		}
 	} else {
-		if data.IntervalToPositionAhead.Value != nil {
+		if data.IntervalToPositionAhead.Value != nil && *data.IntervalToPositionAhead.Value != "" {
 			driver.TimingData.IntervalGap = *data.IntervalToPositionAhead.Value
 		}
-		if data.GapToLeader != nil {
+		if data.GapToLeader != nil && *data.GapToLeader != "" {
 			driver.TimingData.LeaderGap = *data.GapToLeader
 		}
 	}
@@ -765,12 +772,14 @@ func setTireCompound(driver *domain.Driver, compound *string) {
 		case "MEDIUM":
 			driver.TimingData.TireCompound = domain.TireCompoundMedium
 		case "HARD":
-			driver.TimingData.TireCompound = domain.TireCompoundMedium
+			driver.TimingData.TireCompound = domain.TireCompoundHard
 		case "INTERMEDIATE":
 			driver.TimingData.TireCompound = domain.TireCompoundIntermediate
 		case "WET":
 			driver.TimingData.TireCompound = domain.TireCompoundFullWet
 		case "TEST":
+			driver.TimingData.TireCompound = domain.TireCompoundTest
+		case "PROTOTYPE":
 			driver.TimingData.TireCompound = domain.TireCompoundTest
 		default:
 			driver.TimingData.TireCompound = domain.TireCompoundUnknown
@@ -802,45 +811,40 @@ func setIsPitOut(driver *domain.Driver, out *bool) {
 	}
 }
 
-func setSectors(driver *domain.Driver, meeting *domain.Meeting, sectors map[string]sectorTiming) bool {
-	meetingUpdating := false
-	// Sort sectors before
-	sectorNums := make([]string, 0, 3)
-	for sectorNum := range sectors {
-		sectorNums = append(sectorNums, sectorNum)
-	}
-	sort.Strings(sectorNums)
-	for _, sectorNum := range sectorNums {
-		i, _ := strconv.Atoi(sectorNum)
-		sector := sectors[sectorNum]
-		if sector.Value != nil {
-			driver.TimingData.Sectors[i] = domain.Sector{
-				IsActive: true,
-				Time:     *sector.Value,
+func setSectors(driver *domain.Driver, meeting domain.Meeting, sectors map[string]sectorTiming) bool {
+	for sectorNum, secData := range sectors {
+		sector, ok := driver.TimingData.Sectors[sectorNum]
+		if !ok {
+			sector = domain.NewSector()
+		}
+		for segmentNum, segData := range secData.Segments {
+			segment, ok := sector.Segments[segmentNum]
+			if !ok {
+				segment = domain.Segment{}
+			}
+			if meeting.Session.Status != domain.SessionStatusStarted {
+				segment.Status = domain.SectorStatusInactive
+				sector.Segments[segmentNum] = segment
+			} else if segData.Status != nil {
+				// convert f1 livetiming status to domain model status
+				switch *segData.Status {
+				case yellowSegment:
+					segment.Status = domain.SectorStatusNotPersonalBest
+				case greenSegment:
+					segment.Status = domain.SectorStatusPersonalBest
+				case purpleSegment:
+					segment.Status = domain.SectorStatusOverallBest
+				case pitSegment:
+					segment.Status = domain.SectorStatusInactive
+				default:
+					segment.Status = domain.SectorStatusInactive
+				}
+				sector.Segments[segmentNum] = segment
 			}
 		}
-
-		if sector.PersonalBest != nil {
-			driver.TimingData.Sectors[i].IsPersonalBest = *sector.PersonalBest
-		}
-
-		if sector.OverallBest != nil {
-			driver.TimingData.Sectors[i].IsOverallBest = *sector.OverallBest
-		}
-
-		if i < 1 {
-			driver.TimingData.Sectors[1] = domain.Sector{IsActive: false}
-		}
-		if i < 2 {
-			driver.TimingData.Sectors[2] = domain.Sector{IsActive: false}
-		}
-		if sector.OverallBest != nil && *sector.OverallBest {
-			meeting.Session.FastestSectorOwner[i] = driver.Number
-			meetingUpdating = true
-		}
+		driver.TimingData.Sectors[sectorNum] = sector
 	}
-
-	return meetingUpdating
+	return false
 }
 
 func setBestLapInPart(driver *domain.Driver, data driverTimingData) {

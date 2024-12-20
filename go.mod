@@ -8,6 +8,8 @@ require (
 	github.com/coder/websocket v1.8.12
 )
 
+require github.com/qdm12/reprint v0.0.0-20200326205758-722754a53494 // indirect
+
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/bubbles v0.20.0

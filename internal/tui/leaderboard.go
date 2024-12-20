@@ -68,6 +68,7 @@ func (l Leaderboard) View() string {
 			viewHeader(l),
 			viewPadding(l),
 			viewTable(l),
+			viewPadding(l),
 		)
 	}
 
@@ -132,12 +133,11 @@ func viewHeader(l Leaderboard) string {
 
 func viewTable(l Leaderboard) string {
 	t := ""
-	l.logger.Error("session type!", "type", l.meeting.Session.Type)
 	switch l.meeting.Session.Type {
 	case domain.SessionTypeQualifying:
-		return viewQualifyingTable(l)
+		t = viewQualifyingTable(l)
 	case domain.SessionTypeRace:
-		return viewRaceTable(l)
+		t = viewRaceTable(l)
 	}
 
 	return lipgloss.PlaceHorizontal(
@@ -183,7 +183,7 @@ func viewQualifyingTable(l Leaderboard) string {
 
 			return style
 		}).
-		Headers("POS", "DRIVER", "INT", "LEADER", "SECTORS", "Q1 BEST", "Q2 BEST", "Q3 BEST").
+		Headers("POS", "DRIVER", "INT", "LEADER", "MINI SECTORS", "Q1 BEST", "Q2 BEST", "Q3 BEST").
 		Rows(rows...)
 
 	return t.Render()
@@ -209,7 +209,6 @@ func viewRaceTable(l Leaderboard) string {
 
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
-		// BorderStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("99"))).
 		StyleFunc(func(row, col int) lipgloss.Style {
 			style := baseStyle
 
@@ -222,7 +221,7 @@ func viewRaceTable(l Leaderboard) string {
 
 			return style
 		}).
-		Headers("POS", "DRIVER", "INT", "LEADER", "LAST", "SECTORS", "STINT", "BEST").
+		Headers("POS", "DRIVER", "INT", "LEADER", "LAST", "MINI SECTORS", "TIRE", "BEST").
 		Rows(rows...)
 
 	return t.Render()
@@ -376,49 +375,38 @@ func driverSectors(d domain.Driver, m domain.Meeting) string {
 		return s.Subtle.Render("-")
 	}
 
-	if d.TimingData.IsInPit {
-		return disabledSectors()
-	}
-
 	if m.Session.Type == domain.SessionTypeQualifying && d.TimingData.IsPitOut {
 		return s.Subtle.Render("OUT LAP ")
 	}
 
-	sectors := make([]string, 0, 3)
-	// for i, sector := range d.Sectors {
-	for i, sector := range d.TimingData.Sectors {
-		sectorStyle := lipgloss.NewStyle()
-		if !sector.IsActive {
-			sectorStyle = sectorStyle.Foreground(s.Color.Subtle)
-		} else if sector.IsOverallBest && m.Session.FastestSectorOwner[uint8(i)] == d.Number {
-			sectorStyle = sectorStyle.Foreground(s.Color.Purple)
-		} else if sector.IsPersonalBest {
-			sectorStyle = sectorStyle.Foreground(s.Color.Green)
-		} else {
-			sectorStyle = sectorStyle.Foreground(s.Color.Yellow)
+	segments := make([]string, 0)
+
+	// iterate through the sectors (there's always 3)
+	for i := 0; i < 3; i++ {
+		// iterate through the segments in order (there's a variable number)
+		secNum := strconv.Itoa(i)
+		segKeys := make([]string, 0, len(d.TimingData.Sectors[secNum].Segments))
+		for k := range d.TimingData.Sectors[secNum].Segments {
+			segKeys = append(segKeys, k)
 		}
-		sectors = append(sectors, sectorStyle.Render("▃▃"))
+		sort.Strings(segKeys)
+		for _, segKey := range segKeys {
+			switch d.TimingData.Sectors[secNum].Segments[segKey].Status {
+			case domain.SectorStatusNotPersonalBest:
+				segments = append(segments, s.Yellow.Render("▍"))
+			case domain.SectorStatusPersonalBest:
+				segments = append(segments, s.Green.Render("▍"))
+			case domain.SectorStatusOverallBest:
+				segments = append(segments, s.Purple.Render("▍"))
+			default:
+				segments = append(segments, s.Subtle.Render("▍"))
+			}
+		}
 	}
 
 	return lipgloss.JoinHorizontal(
 		lipgloss.Center,
-		sectors[0],
-		" ",
-		sectors[1],
-		" ",
-		sectors[2],
-	)
-}
-
-func disabledSectors() string {
-	sector := lipgloss.NewStyle().Foreground(s.Color.Subtle).Render("▃▃")
-	return lipgloss.JoinHorizontal(
-		lipgloss.Center,
-		sector,
-		" ",
-		sector,
-		" ",
-		sector,
+		segments...,
 	)
 }
 
