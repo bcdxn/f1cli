@@ -16,6 +16,6 @@ Type "go run ../cmd/tui/main.go"
 Enter
 Show
 
-Sleep 20s
+Sleep 15s
 
 Ctrl+C

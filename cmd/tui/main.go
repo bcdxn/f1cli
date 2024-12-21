@@ -50,8 +50,9 @@ func main() {
 			leaderboard.Send(tui.DriversMsg(drivers))
 		case meeting := <-client.Meeting():
 			leaderboard.Send(tui.MeetingMsg(meeting))
-		case raceCtrlMessages := <-client.RaceCtrlMsgs():
-			leaderboard.Send(tui.RaceCtrlMsgsMsg(raceCtrlMessages))
+		case raceCtrlMsg := <-client.RaceCtrlMsgs():
+			l.Debug("race control message", "msg", raceCtrlMsg)
+			leaderboard.Send(tui.RaceCtrlMsg(raceCtrlMsg))
 		}
 	}
 }

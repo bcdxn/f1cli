@@ -9,6 +9,7 @@ type Style struct {
 	SubtitleBar   lipgloss.Style
 	ToastMsgTitle lipgloss.Style
 	ToastMsgBody  lipgloss.Style
+	TableRow      lipgloss.Style
 	Green         lipgloss.Style
 	Purple        lipgloss.Style
 	Red           lipgloss.Style
@@ -19,6 +20,7 @@ type Style struct {
 type Color struct {
 	Red               lipgloss.Color
 	Yellow            lipgloss.Color
+	Blue              lipgloss.Color
 	Green             lipgloss.Color
 	Purple            lipgloss.Color
 	Orange            lipgloss.Color
@@ -37,6 +39,7 @@ type Color struct {
 func Default() *Style {
 	red := lipgloss.Color("#CF040E")
 	yellow := lipgloss.Color("#FAD105")
+	blue := lipgloss.Color("#41B6E6")
 	green := lipgloss.Color("#17C81D")
 	purple := lipgloss.Color("#DA0ED3")
 	orange := lipgloss.Color("#F77C14")
@@ -56,6 +59,7 @@ func Default() *Style {
 			// F1 colors
 			Red:              red,
 			Yellow:           yellow,
+			Blue:             blue,
 			Green:            green,
 			Purple:           purple,
 			Orange:           orange,
@@ -96,11 +100,13 @@ func Default() *Style {
 			AlignVertical(lipgloss.Center).
 			Background(light).
 			Foreground(dark).
+			MaxWidth(76).
 			Padding(1, 2),
-		Green:  lipgloss.NewStyle().Foreground(green),
-		Purple: lipgloss.NewStyle().Foreground(purple),
-		Red:    lipgloss.NewStyle().Foreground(red),
-		Yellow: lipgloss.NewStyle().Foreground(yellow),
-		Subtle: lipgloss.NewStyle().Foreground(subtle),
+		TableRow: lipgloss.NewStyle().Padding(0, 1, 1, 1),
+		Green:    lipgloss.NewStyle().Foreground(green),
+		Purple:   lipgloss.NewStyle().Foreground(purple),
+		Red:      lipgloss.NewStyle().Foreground(red),
+		Yellow:   lipgloss.NewStyle().Foreground(yellow),
+		Subtle:   lipgloss.NewStyle().Foreground(subtle),
 	}
 }

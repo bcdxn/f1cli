@@ -23,16 +23,15 @@ import (
 func New(opts ...ClientOption) Client {
 	// create a default instance of the client
 	c := Client{
-		drivers:        make(map[string]domain.Driver),
-		meeting:        domain.NewMeeting(),
-		raceCtrlMsgs:   make([]domain.RaceCtrlMsg, 0),
-		driversCh:      make(chan map[string]domain.Driver),
-		meetingCh:      make(chan domain.Meeting),
-		raceCtrlMsgsCh: make(chan []domain.RaceCtrlMsg),
-		doneCh:         make(chan error),
-		logger:         slog.Default(),
-		httpBaseURL:    "http://localhost:3000",
-		wsBaseURL:      "ws://localhost:3000",
+		drivers:       make(map[string]domain.Driver),
+		meeting:       domain.NewMeeting(),
+		driversCh:     make(chan map[string]domain.Driver),
+		meetingCh:     make(chan domain.Meeting),
+		raceCtrlMsgCh: make(chan domain.RaceCtrlMsg),
+		doneCh:        make(chan error),
+		logger:        slog.Default(),
+		httpBaseURL:   "http://localhost:3000",
+		wsBaseURL:     "ws://localhost:3000",
 	}
 	// apply given options
 	for _, opt := range opts {
@@ -46,14 +45,14 @@ type Client struct {
 	// Internal Session State
 	drivers         map[string]domain.Driver
 	meeting         domain.Meeting
-	raceCtrlMsgs    []domain.RaceCtrlMsg
+	raceCtrlMsg     domain.RaceCtrlMsg
 	connectionToken string
 	cookie          string
 	// channels
-	driversCh      chan map[string]domain.Driver
-	meetingCh      chan domain.Meeting
-	raceCtrlMsgsCh chan []domain.RaceCtrlMsg
-	doneCh         chan error
+	driversCh     chan map[string]domain.Driver
+	meetingCh     chan domain.Meeting
+	raceCtrlMsgCh chan domain.RaceCtrlMsg
+	doneCh        chan error
 	// F1 Live Timing API Configuration
 	httpBaseURL string
 	wsBaseURL   string
@@ -99,8 +98,8 @@ func (c Client) Meeting() <-chan domain.Meeting {
 
 // RaceCtrlMsgsCh exposes the race control messages channel as read-only; a full list of all race
 // control messages can be read from this channel on each update from the F1 LiveTiming API.
-func (c Client) RaceCtrlMsgs() <-chan []domain.RaceCtrlMsg {
-	return c.raceCtrlMsgsCh
+func (c Client) RaceCtrlMsgs() <-chan domain.RaceCtrlMsg {
+	return c.raceCtrlMsgCh
 }
 
 // DoneCh allows the client to signal to the caller that it has exited; this can happen if an error
@@ -347,6 +346,8 @@ func (c *Client) processChangeMessage(changesRawMessage []byte) {
 				s, d, r = c.updateLapCount(c.unmarshalLapCountMsg(msgData))
 			case "TimingAppData":
 				s, d, r = c.updateTimingAppData(c.unmarshalTimingAppDataMsg(msgData))
+			case "RaceControlMessages":
+				s, d, r = c.updateRaceCtrlMsg(c.unmarshalRaceCtrlMsg(msgData))
 			default:
 				c.logger.Warn("unknown change message", "type", msgType, "msg", string(msgData))
 			}
@@ -390,10 +391,11 @@ func (c *Client) processReferenceMessage(referenceRawMsg []byte) {
 	c.updateLapCount(c.unmarshalLapCountMsg(refMsg.LapCount))
 	c.updateTimingData(c.unmarshalTimingDataMsg(refMsg.TimingData))
 	c.updateTimingAppData(c.unmarshalTimingAppDataMsg(refMsg.TimingAppData))
+	c.updateRaceCtrlMsg(c.unmarshalRaceCtrlMsg(refMsg.RaceCtrlMsgs))
 	// The reference message always updates all channels
-	c.meetingCh <- c.meeting
+	c.writeMeetingToChan()
 	c.writeDriversToChan()
-	// c.writeRaceCtrlMsgsToChan()
+	c.writeRaceCtrlMsgsToChan()
 }
 
 /* Message Unmarshalers
@@ -464,6 +466,15 @@ func (c *Client) unmarshalTimingAppDataMsg(msg []byte) timingAppData {
 	}
 
 	return tad
+}
+func (c *Client) unmarshalRaceCtrlMsg(msg []byte) raceCtrlMsgs {
+	var rcm raceCtrlMsgs
+	err := json.Unmarshal(msg, &rcm)
+	if err != nil {
+		c.logger.Warn("race ctrl msg in unknown format", "msg", string(msg))
+	}
+
+	return rcm
 }
 
 /* Channel Updaters
@@ -599,7 +610,7 @@ func (c *Client) updateTimingData(timingDataMsg timingDataMsg) (meetingUpdating,
 
 // updateTimingAppData updates driver stint and position data.
 func (c *Client) updateTimingAppData(tad timingAppData) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
-	// thils function always updates drivers
+	// this function always updates drivers
 	driversUpdated = true
 	for driverNum, timingAppData := range tad.Lines {
 		// if multiple stints are given (e.g. in the reference message) we'll iterate through them,
@@ -635,6 +646,68 @@ func (c *Client) updateTimingAppData(tad timingAppData) (meetingUpdating, driver
 	return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
 }
 
+func (c *Client) updateRaceCtrlMsg(msgs raceCtrlMsgs) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
+	// this function always updates race control messages
+	raceCtrlMsgsUpdated = true
+	// get the latest message by sorting the keys
+	var latestMsg raceCtrlMsg
+	rcmKeys := make([]string, 0)
+	for key := range msgs.Messages {
+		rcmKeys = append(rcmKeys, key)
+	}
+	sort.Strings(rcmKeys)
+	for _, key := range rcmKeys {
+		latestMsg = msgs.Messages[key]
+	}
+
+	c.raceCtrlMsg = domain.RaceCtrlMsg{
+		Body: latestMsg.Message,
+	}
+
+	switch latestMsg.Category {
+	case raceCtrlStatusFlag:
+		c.raceCtrlMsg.Category = domain.RaceCtrlMsgCategoryTrackStatus
+		switch latestMsg.Flag {
+		case raceCtrlFlagClear:
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleFlagGreen
+		case raceCtrlFlagGreen:
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleFlagGreen
+		case raceCtrlFlagBlue:
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleFlagBlue
+		case raceCtrlFlagYellow:
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleFlagYellow
+		case raceCtrlFlagDoubleYellow:
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleFlagDoubleYellow
+		case raceCtrlFlagRed:
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleFlagRed
+		case raceCtrlFlagBW:
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleFlagBW
+		default:
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleDefault
+		}
+	case raceCtrlStatusSC:
+		c.raceCtrlMsg.Category = domain.RaceCtrlMsgCategoryTrackStatus
+		if latestMsg.Mode == raceCtrlModeSC {
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleSC
+		} else if latestMsg.Mode == raceCtrlModeVSC {
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleVSC
+		} else {
+			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleDefault
+		}
+	case raceCtrlStatusDRS:
+		c.raceCtrlMsg.Category = domain.RaceCtrlMsgCategoryFIA
+		c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleDefault
+	case raceCtrlStatusOther:
+		c.raceCtrlMsg.Category = domain.RaceCtrlMsgCategoryFIA
+		c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleFIA
+	default:
+		c.raceCtrlMsg.Category = domain.RaceCtrlMsgCategoryOther
+		c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleDefault
+	}
+
+	return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
+}
+
 // writeMeetingToChan writes  a copy of the meeting to ensure concurrency safety between goroutines.
 func (c *Client) writeMeetingToChan() {
 	var cpy domain.Meeting
@@ -657,9 +730,9 @@ func (c *Client) writeDriversToChan() {
 // Because slices are not concurrency-safe, we'll copy the slice before writing it to the channel
 // that can be read by concurrent goroutines.
 func (c *Client) writeRaceCtrlMsgsToChan() {
-	cpy := make([]domain.RaceCtrlMsg, 0, len(c.raceCtrlMsgs))
-	copy(cpy, c.raceCtrlMsgs)
-	c.raceCtrlMsgsCh <- cpy
+	var cpy domain.RaceCtrlMsg
+	reprint.FromTo(&c.raceCtrlMsg, &cpy)
+	c.raceCtrlMsgCh <- cpy
 }
 
 /* Message Transformers

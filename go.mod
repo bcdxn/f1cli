@@ -6,9 +6,9 @@ require (
 	github.com/charmbracelet/bubbletea v1.2.4
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/coder/websocket v1.8.12
+	github.com/muesli/reflow v0.3.0
+	github.com/qdm12/reprint v0.0.0-20200326205758-722754a53494
 )
-
-require github.com/qdm12/reprint v0.0.0-20200326205758-722754a53494 // indirect
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect

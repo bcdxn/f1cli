@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/muesli/reflow/wordwrap"
 )
 
 var (
@@ -69,6 +70,8 @@ func (l Leaderboard) View() string {
 			viewPadding(l),
 			viewTable(l),
 			viewPadding(l),
+			viewRaceCtrlMsg(l),
+			viewPadding(l),
 		)
 	}
 
@@ -89,6 +92,8 @@ func (l Leaderboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case DriversMsg:
 		l.drivers = map[string]domain.Driver(msg)
 		l.isLoaded = true
+	case RaceCtrlMsg:
+		l.raceCtrlMsg = domain.RaceCtrlMsg(msg)
 	default:
 		if !l.isLoaded {
 			l.spinner, cmd = l.spinner.Update(msg)
@@ -150,7 +155,7 @@ func viewTable(l Leaderboard) string {
 }
 
 func viewQualifyingTable(l Leaderboard) string {
-	baseStyle := lipgloss.NewStyle().Padding(0, 1, 1, 1)
+	baseStyle := s.TableRow
 	drivers := sortDrivers(l.drivers)
 	rows := make([][]string, 0, len(drivers))
 
@@ -190,7 +195,7 @@ func viewQualifyingTable(l Leaderboard) string {
 }
 
 func viewRaceTable(l Leaderboard) string {
-	baseStyle := lipgloss.NewStyle().Padding(0, 1, 1, 1)
+	baseStyle := s.TableRow
 	drivers := sortDrivers(l.drivers)
 	rows := make([][]string, 0, len(drivers))
 
@@ -443,12 +448,67 @@ func sortDrivers(driverMap map[string]domain.Driver) []domain.Driver {
 	return drivers
 }
 
+func viewRaceCtrlMsg(l Leaderboard) string {
+	title := l.raceCtrlMsg.Title
+	body := l.raceCtrlMsg.Body
+	var titleStyle lipgloss.Style
+	var bodyStyle lipgloss.Style
+	switch l.raceCtrlMsg.Category {
+	case domain.RaceCtrlMsgCategoryFIA:
+		titleStyle = s.ToastMsgTitle.Background(s.Color.FiaBlue).Foreground(s.Color.Light)
+		bodyStyle = s.ToastMsgBody.Background(s.Color.Light).Foreground(s.Color.FiaBlue)
+	case domain.RaceCtrlMsgCategoryTrackStatus:
+		bodyStyle = s.ToastMsgBody.Background(s.Color.Light).Foreground(s.Color.Dark)
+		switch l.raceCtrlMsg.Title {
+		case domain.RaceCtrlMsgTitleFlagBlue:
+			titleStyle = s.ToastMsgTitle.Background(s.Color.Blue).Foreground(s.Color.Dark)
+		case domain.RaceCtrlMsgTitleFlagYellow:
+			titleStyle = s.ToastMsgTitle.Background(s.Color.Yellow).Foreground(s.Color.Dark)
+		case domain.RaceCtrlMsgTitleFlagDoubleYellow:
+			titleStyle = s.ToastMsgTitle.Background(s.Color.Yellow).Foreground(s.Color.Dark)
+		case domain.RaceCtrlMsgTitleVSC:
+			titleStyle = s.ToastMsgTitle.Background(s.Color.Yellow).Foreground(s.Color.Dark)
+		case domain.RaceCtrlMsgTitleSC:
+			titleStyle = s.ToastMsgTitle.Background(s.Color.Yellow).Foreground(s.Color.Dark)
+		case domain.RaceCtrlMsgTitleFlagBW:
+			titleStyle = s.ToastMsgTitle.Background(s.Color.Dark).Foreground(s.Color.Light)
+		case domain.RaceCtrlMsgTitleFlagRed:
+			titleStyle = s.ToastMsgTitle.Background(s.Color.Red).Foreground(s.Color.Light)
+		case domain.RaceCtrlMsgTitleFlagGreen:
+			titleStyle = s.ToastMsgTitle.Background(s.Color.Green).Foreground(s.Color.Dark)
+		default:
+			titleStyle = s.ToastMsgTitle.Background(s.Color.Dark)
+		}
+	}
+
+	renderedTitle := titleStyle.Render(title)
+	renderedBody := bodyStyle.Render(wordwrap.String(body, bodyStyle.GetMaxWidth()-(bodyStyle.GetPaddingLeft()+bodyStyle.GetPaddingRight())))
+
+	if lipgloss.Height(renderedTitle) > lipgloss.Height(renderedBody) {
+		renderedBody = bodyStyle.Height(lipgloss.Height(renderedTitle)).Render(body)
+	} else {
+		renderedTitle = titleStyle.Height(lipgloss.Height(renderedBody)).Render(title)
+	}
+
+	return lipgloss.PlaceHorizontal(
+		l.width,
+		lipgloss.Center,
+		lipgloss.JoinHorizontal(
+			lipgloss.Center,
+			renderedTitle,
+			renderedBody,
+		),
+		lipgloss.WithWhitespaceChars("."),
+		lipgloss.WithWhitespaceForeground(s.Color.Subtle),
+	)
+}
+
 /* Tea Mesage Types
 ------------------------------------------------------------------------------------------------- */
 
 type DriversMsg map[string]domain.Driver
 type MeetingMsg domain.Meeting
-type RaceCtrlMsgsMsg []domain.RaceCtrlMsg
+type RaceCtrlMsg domain.RaceCtrlMsg
 
 /* Tea Mesage handlers
 ------------------------------------------------------------------------------------------------- */
@@ -478,9 +538,10 @@ func handleWindowSizeMsg(l Leaderboard, msg tea.WindowSizeMsg) (Leaderboard, tea
 
 type Leaderboard struct {
 	// leaderboard state
-	meeting  domain.Meeting
-	drivers  map[string]domain.Driver
-	isLoaded bool
+	meeting     domain.Meeting
+	drivers     map[string]domain.Driver
+	raceCtrlMsg domain.RaceCtrlMsg
+	isLoaded    bool
 	// metadata
 	ctx    context.Context
 	logger *slog.Logger

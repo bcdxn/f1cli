@@ -20,6 +20,22 @@ const (
 	pitSegment    = 2064
 )
 
+const (
+	raceCtrlFlagClear        = "CLEAR"
+	raceCtrlFlagGreen        = "GREEN"
+	raceCtrlFlagBlue         = "BLUE"
+	raceCtrlFlagBW           = "BLACK AND WHITE"
+	raceCtrlFlagYellow       = "YELLOW"
+	raceCtrlFlagDoubleYellow = "DOUBLE YELLOW"
+	raceCtrlFlagRed          = "RED"
+	raceCtrlStatusFlag       = "Flag"
+	raceCtrlStatusSC         = "SafetyCar"
+	raceCtrlModeVSC          = "VIRTUAL SAFETY CAR"
+	raceCtrlModeSC           = "SAFETY CAR"
+	raceCtrlStatusDRS        = "Drs"
+	raceCtrlStatusOther      = "Other"
+)
+
 // f1Message represents a websocket message from the F1 Live Timing API. It comes in two primary
 // varieties: Change messages and Reference messages. There is a single Reference message sent at
 // the beginning of the websocket connection, followed by updates via Change maessages.
@@ -175,13 +191,29 @@ type driverListItem struct {
 }
 
 // changeRaceCtrlMsgs contains a map of race control messages.
-type changeRaceCtrlMsgs struct {
-	Messages map[string]raceCtrlMsg `json:"Messages"`
+type raceCtrlMsgs struct {
+	Messages raceCtrlMsgsMap `json:"Messages"`
 }
 
-// referenceRaceCtrlMsgs contains a list of race control messages.
-type referenceRaceCtrlMsgs struct {
-	Messages []raceCtrlMsg `json:"Messages"`
+type raceCtrlMsgsMap map[string]raceCtrlMsg
+
+func (rcm *raceCtrlMsgsMap) UnmarshalJSON(data []byte) error {
+	// first try unmarshalling from change message structure
+	m := make(map[string]raceCtrlMsg)
+	if err := json.Unmarshal(data, &m); err == nil {
+		*rcm = m
+		return nil
+	}
+	// next try unmarshalling from reference message structure
+	s := make([]raceCtrlMsg, 0)
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	for i, k := range s {
+		m[strconv.Itoa(i)] = k
+	}
+	*rcm = m
+	return nil
 }
 
 // raceCtrlMsgs represents a message or alert issued by Race Control. This includes information
