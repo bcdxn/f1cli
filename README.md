@@ -6,3 +6,45 @@
 _Formula 1 in your terminal_
 
 ![race](readme-assets/demo.gif)
+
+## Download
+
+### Homebrew
+
+`coming soon...`
+
+## Running F1 CLI
+
+Once you've installed F1 CLI, in your terminal emulator of choice, simply run:
+
+```
+f1
+```
+
+> [!INFO]
+> There must be an active F1 session
+
+## Suggested Terminal Settings
+
+F1 CLI relies on lipgloss for styling; it will look best with certain fonts. F1 CLI is tested using
+the font 'Menlo' with a font size of 12, which will likely give the best results in terms of alignment and overall styling.
+
+## Local Dev
+
+#### Test
+
+```
+go test ./...
+```
+
+#### Run
+
+```
+go run cmd/tui/main.go
+```
+
+#### Validate Goreleaser
+
+```
+goreleaser release --snapshot --clean
+```
