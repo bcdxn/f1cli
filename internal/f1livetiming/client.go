@@ -30,8 +30,8 @@ func New(opts ...ClientOption) Client {
 		raceCtrlMsgCh: make(chan domain.RaceCtrlMsg),
 		doneCh:        make(chan error),
 		logger:        slog.Default(),
-		httpBaseURL:   "http://localhost:3000",
-		wsBaseURL:     "ws://localhost:3000",
+		httpBaseURL:   "https://livetiming.formula1.com",
+		wsBaseURL:     "wss://livetiming.formula1.com",
 	}
 	// apply given options
 	for _, opt := range opts {
@@ -507,25 +507,27 @@ func (c *Client) updateSessionData(session sessionData) (meetingUpdating, driver
 	// this function always updates session
 	meetingUpdating = true
 	// update the session status to the latest/current status
-	statusKeys := make([]string, 0)
+	statusKeys := make([]int, 0)
 	for key := range session.StatusSeries {
-		statusKeys = append(statusKeys, key)
+		i, _ := strconv.Atoi(key)
+		statusKeys = append(statusKeys, i)
 	}
 	// Access the status messages in order so that we end up on the latest entry
-	sort.Strings(statusKeys)
+	sort.Ints(statusKeys)
 	for _, key := range statusKeys {
-		setSessionStatus(&c.meeting, session.StatusSeries[key].SessionStatus)
+		setSessionStatus(&c.meeting, session.StatusSeries[strconv.Itoa(key)].SessionStatus)
 	}
 
 	// Update the session part to the latest/current session part
-	seriesKeys := make([]string, 0)
+	seriesKeys := make([]int, 0)
 	for key := range session.Series {
-		seriesKeys = append(seriesKeys, key)
+		i, _ := strconv.Atoi(key)
+		seriesKeys = append(seriesKeys, i)
 	}
 	// Access the series messages in order so that we end up on the latest entry
-	sort.Strings(seriesKeys)
+	sort.Ints(seriesKeys)
 	for _, key := range seriesKeys {
-		setSessionPart(&c.meeting, session.Series[key].QualifyingPart)
+		setSessionPart(&c.meeting, session.Series[strconv.Itoa(key)].QualifyingPart)
 	}
 
 	return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
@@ -647,27 +649,33 @@ func (c *Client) updateTimingAppData(tad timingAppData) (meetingUpdating, driver
 }
 
 func (c *Client) updateRaceCtrlMsg(msgs raceCtrlMsgs) (meetingUpdating, driversUpdated, raceCtrlMsgsUpdated bool) {
-	// this function always updates race control messages
-	raceCtrlMsgsUpdated = true
 	// get the latest message by sorting the keys
 	var latestMsg raceCtrlMsg
-	rcmKeys := make([]string, 0)
+	rcmKeys := make([]int, 0)
 	for key := range msgs.Messages {
-		rcmKeys = append(rcmKeys, key)
+		i, _ := strconv.Atoi(key)
+		rcmKeys = append(rcmKeys, i)
 	}
-	sort.Strings(rcmKeys)
+	sort.Ints(rcmKeys)
 	for _, key := range rcmKeys {
-		latestMsg = msgs.Messages[key]
+		latestMsg = msgs.Messages[strconv.Itoa(key)]
+	}
+
+	if latestMsg.Category == nil || latestMsg.Message == nil {
+		return meetingUpdating, driversUpdated, raceCtrlMsgsUpdated
 	}
 
 	c.raceCtrlMsg = domain.RaceCtrlMsg{
-		Body: latestMsg.Message,
+		Body: *latestMsg.Message,
 	}
 
-	switch latestMsg.Category {
+	// this function always updates race control messages
+	raceCtrlMsgsUpdated = true
+
+	switch *latestMsg.Category {
 	case raceCtrlStatusFlag:
 		c.raceCtrlMsg.Category = domain.RaceCtrlMsgCategoryTrackStatus
-		switch latestMsg.Flag {
+		switch *latestMsg.Flag {
 		case raceCtrlFlagClear:
 			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleFlagGreen
 		case raceCtrlFlagGreen:
@@ -687,9 +695,9 @@ func (c *Client) updateRaceCtrlMsg(msgs raceCtrlMsgs) (meetingUpdating, driversU
 		}
 	case raceCtrlStatusSC:
 		c.raceCtrlMsg.Category = domain.RaceCtrlMsgCategoryTrackStatus
-		if latestMsg.Mode == raceCtrlModeSC {
+		if *latestMsg.Mode == raceCtrlModeSC {
 			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleSC
-		} else if latestMsg.Mode == raceCtrlModeVSC {
+		} else if *latestMsg.Mode == raceCtrlModeVSC {
 			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleVSC
 		} else {
 			c.raceCtrlMsg.Title = domain.RaceCtrlMsgTitleDefault
@@ -779,7 +787,9 @@ func setGaps(driver *domain.Driver, meeting domain.Meeting, data driverTimingDat
 	} else if meeting.Session.Type == domain.SessionTypeQualifying {
 		// In Qualifying Sessions the interval is stored separately for each qualifying part; we're only
 		// interested the most recent qualifying part, so we iterate through (the list is in order) and
-		// overwrite the gaps for each available qualifying part ending with the most recent.
+		// overwrite the gaps for each available qualifying part ending with the most recent. Note, we
+		// can leave the keys as strings for sorting since thre are only 3 parts (e.g. no issue with
+		// 10 < 2).
 		parts := make([]string, 0, 3)
 		for part := range data.QualifyingStats {
 			parts = append(parts, part)

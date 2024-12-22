@@ -23,7 +23,7 @@ func TestProcessReferenceMessage(t *testing.T) {
 		c := New(WithLogger(testLogger(t)))
 		go c.processMessage(ref)
 
-		wait := 2
+		wait := 3
 		for wait > 0 {
 			select {
 			case meeting := <-c.Meeting():
@@ -57,14 +57,17 @@ func TestProcessReferenceMessage(t *testing.T) {
 				if drivers["81"].TimingData.Position != 9 {
 					t.Errorf("expected position %d but found %d", 9, drivers["81"].TimingData.Position)
 				}
-				if drivers["1"].TimingData.TireCompound != domain.TireCompoundMedium {
-					t.Errorf("expected tire compound '%s' but found '%s'", domain.TireCompoundMedium, drivers["1"].TimingData.TireCompound)
+				if drivers["1"].TimingData.TireCompound != domain.TireCompoundHard {
+					t.Errorf("expected tire compound '%s' but found '%s'", domain.TireCompoundHard, drivers["1"].TimingData.TireCompound)
 				}
 				if drivers["1"].TimingData.NumberOfLaps != 6 {
 					t.Errorf("expected stint laps %d but found %d", 6, drivers["1"].TimingData.NumberOfLaps)
 				}
-				// case <-c.RaceCtrlMsgs():
-				// 	wait--
+			case raceCtrlMsg := <-c.RaceCtrlMsgs():
+				wait--
+				if raceCtrlMsg.Body != "FIA STEWARDS: TURN 11 INCIDENT INVOLVING CARS 97 (SHW) WILL BE INVESTIGATED AFTER THE SESSION - OVERTAKING UNDER YELLOW FLAGS" {
+					t.Errorf("incorrect message body, found '%s'", raceCtrlMsg.Body)
+				}
 			}
 		}
 	})
@@ -295,12 +298,14 @@ func newReferenecedClient(t *testing.T, refpath string) Client {
 	c := New(WithLogger(testLogger(t)))
 	go c.processMessage(ref)
 
-	wait := 2
+	wait := 3
 	for wait > 0 {
 		select {
 		case <-c.Meeting():
 			wait--
 		case <-c.Drivers():
+			wait--
+		case <-c.RaceCtrlMsgs():
 			wait--
 		}
 	}

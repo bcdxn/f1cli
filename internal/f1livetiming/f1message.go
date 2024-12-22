@@ -219,15 +219,15 @@ func (rcm *raceCtrlMsgsMap) UnmarshalJSON(data []byte) error {
 // raceCtrlMsgs represents a message or alert issued by Race Control. This includes information
 // about investigations, penalties, track limits violations, flag information and more.
 type raceCtrlMsg struct {
-	UTC      string `json:"Utc"`
-	Lap      int    `json:"Lap"`
-	Category string `json:"Category"`
-	Message  string `json:"Message"`
-	Flag     string `json:"Flag"`
-	Mode     string `json:"Mode"`
-	Scope    string `json:"Scope"`
-	Status   string `json:"Status"`
-	Sector   int    `json:"Sector"`
+	UTC      *string `json:"Utc"`
+	Lap      *int    `json:"Lap"`
+	Category *string `json:"Category"`
+	Message  *string `json:"Message"`
+	Flag     *string `json:"Flag"`
+	Mode     *string `json:"Mode"`
+	Scope    *string `json:"Scope"`
+	Status   *string `json:"Status"`
+	Sector   *int    `json:"Sector"`
 }
 
 // sessionInfo contains intrinsic data about the weekend event and current session. Typically this
