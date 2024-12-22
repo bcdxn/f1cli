@@ -9,13 +9,11 @@ _Formula 1 in your terminal_
 
 ## Download
 
-### Homebrew
-
-`coming soon...`
+Download the [release binary](https://github.com/bcdxn/f1cli/releases) appropriate for your system and ensure it's available on your path.
 
 ## Running F1 CLI
 
-Once you've installed F1 CLI, in your terminal emulator of choice, simply run:
+Once you've added F1 CLI to your path, in your terminal emulator of choice, simply run:
 
 ```
 f1
