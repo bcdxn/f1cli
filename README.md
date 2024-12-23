@@ -19,7 +19,7 @@ Once you've added F1 CLI to your path, in your terminal emulator of choice, simp
 f1
 ```
 
-> [!INFO]
+> [!NOTE]
 > There must be an active F1 session
 
 ## Suggested Terminal Settings
